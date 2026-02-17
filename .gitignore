@@ -1,0 +1,46 @@
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.sln.docstates
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Rider
+.idea/
+*.sln.iml
+
+# Unreal Engine
+Binaries/
+Intermediate/
+DerivedDataCache/
+Saved/
+*.pdb
+
+# Build artifacts
+Build/Receipts/
+Build/*.target
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# Content (only if using Git LFS)
+# Content/Collections/
+# Content/Developers/
+
+# Packaging
+Dist/
+Packaged/
+
+# Keep plugin binaries if distributing pre-compiled
+# !Plugin/*/Binaries/
+
+# content
+# Content - exclude all except _Game
+Content/*
+!Content/_Game/
+!Content/_Game/**
