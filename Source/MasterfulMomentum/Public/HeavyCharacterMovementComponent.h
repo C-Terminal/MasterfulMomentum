@@ -37,6 +37,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement")
 	float HeavyTurnRate = 120.f; // Degrees per second
 
+	UPROPERTY()
+	FVector CustomInputVector;
+
 protected:
 	// --- Core CMC Overrides ---
 	virtual void PhysCustom(float deltaTime, int32 Iterations) override;
