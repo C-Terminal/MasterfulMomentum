@@ -15,7 +15,6 @@ class MASTERFULMOMENTUM_API AHeavyCharacter : public ACharacter
 public:
 
 	// This runs when the pawn is possessed and ready for input
-	virtual void PawnClientRestart() override;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
 	class UInputMappingContext* HeavyMovementContext;
