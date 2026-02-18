@@ -95,6 +95,8 @@ void AHeavyCharacter::UpdateCameraPan(float DeltaTime)
 	{
 		return;
 	}
+
+	// Get normalized mouse position
 	FVector2D NormalizedMouse;
 	if (!GetNormalizedMousePosition(NormalizedMouse))
 	{
@@ -112,7 +114,6 @@ void AHeavyCharacter::UpdateCameraPan(float DeltaTime)
 	}
 	else
 	{
-		// Remap from deadzone edge to full range
 		PanInput.X = (FMath::Abs(PanInput.X) - CameraPanDeadZone) / (1.0f - CameraPanDeadZone) *
 			FMath::Sign(PanInput.X);
 	}
@@ -127,22 +128,26 @@ void AHeavyCharacter::UpdateCameraPan(float DeltaTime)
 			FMath::Sign(PanInput.Y);
 	}
 
-	// Calculate camera's right and forward vectors (projected onto ground plane)
-	// We use the SpringArm's rotation since that's what defines our view angle
-	const FRotator CameraRotation = CameraBoom->GetComponentRotation();
+	// === FIXED: Use Controller/Camera rotation, not character rotation ===
 
-	// Get right vector (always horizontal)
-	FVector CameraRight = FRotationMatrix(FRotator(0, CameraRotation.Yaw, 0)).GetUnitAxis(EAxis::Y);
+	// Get the controller's yaw rotation (or camera's fixed rotation if you prefer)
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
 
-	// Get forward vector projected onto ground plane
-	FVector CameraForward = CameraRotation.Vector();
-	CameraForward.Z = 0.0f; // Project to ground
-	CameraForward.Normalize();
+	const FRotator ControlRotation = PC->GetControlRotation();
+
+	// Get right and forward vectors based on CAMERA view, not character facing
+	FVector CameraRight = FRotationMatrix(FRotator(0, ControlRotation.Yaw, 0)).GetUnitAxis(EAxis::Y);
+	FVector CameraForward = FRotationMatrix(FRotator(0, ControlRotation.Yaw, 0)).GetUnitAxis(EAxis::X);
 
 	// Calculate desired offset in world space
-	// Invert Y because screen Y increases downward but we want mouse down = camera forward
+	// Screen X = Camera Right, Screen Y (inverted) = Camera Forward
 	FVector DesiredOffset = (CameraRight * PanInput.X * MaxCameraPanDistance) +
 		(CameraForward * -PanInput.Y * MaxCameraPanDistance);
+
 	// Smoothly interpolate to desired offset
 	CurrentCameraOffset = FMath::VInterpTo(CurrentCameraOffset, DesiredOffset, DeltaTime, CameraPanSpeed);
 
