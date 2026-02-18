@@ -1,13 +1,12 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-
 #include "MasterfulMomentum/Public/HeavyCharacterMovementComponent.h"
 
 UHeavyCharacterMovementComponent::UHeavyCharacterMovementComponent()
 {
 	// Enable parameters ensuring we can't turn instantly
 	bUseControllerDesiredRotation = false;
-	bOrientRotationToMovement = false; 
+	bOrientRotationToMovement = false;
 }
 
 void UHeavyCharacterMovementComponent::SetHeavyModeEnabled(bool bEnabled)
@@ -25,7 +24,7 @@ void UHeavyCharacterMovementComponent::SetHeavyModeEnabled(bool bEnabled)
 // 1. Hook into the Physics Engine
 void UHeavyCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterations)
 {
-	Super::PhysCustom(deltaTime, Iterations);
+	// Super::PhysCustom(deltaTime, Iterations);
 
 	if (CustomMovementMode == CMOVE_HeavyGrounded)
 	{
@@ -33,129 +32,106 @@ void UHeavyCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterati
 	}
 }
 
-// 2. Implement the custom physics
 void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 Iterations)
 {
-	// TODO: Implement custom physics
 	if (deltaTime < MIN_TICK_TIME) return;
 
-	// A. Calculate Input
-	//We don't want the raw input vector to snap our velocity
+	// DEBUG: Check BEFORE consuming
+	FVector PendingInput = GetPendingInputVector();
+	UE_LOG(LogTemp, Warning, TEXT("PendingInputVector BEFORE consume: %s"), *PendingInput.ToString());
+
 	FVector InputVector = ConsumeInputVector();
+	UE_LOG(LogTemp, Warning, TEXT("InputVector AFTER consume: %s"), *InputVector.ToString());
+    
+
+
+
 	if (!InputVector.IsNearlyZero())
 	{
 		InputVector = InputVector.GetSafeNormal();
 	}
 
-	// B. Calculate Rotation (Heavy Turning)
-	// Project Zomboid style: Character rotates slowly, velocity follows.
+	bool bHasInput = !InputVector.IsNearlyZero();
+	UE_LOG(LogTemp, Warning, TEXT("bHasInput: %s"), bHasInput ? TEXT("TRUE") : TEXT("FALSE"));
+	// --- B. Calculate Rotation (Heavy Turning) ---
 	if (!InputVector.IsNearlyZero())
 	{
 		FRotator CurrentRotation = UpdatedComponent->GetComponentRotation();
 		FRotator TargetRotation = InputVector.Rotation();
 
-		// RInterpConstantTo ensures a fixed turn rate (Tank-like or Heavy Human)
-		// RInterpTo would be "Spring-like" (fast at first, slow at end)
+		// Use constant interpolation for a "tanky" or heavy human feel
 		FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, TargetRotation, deltaTime, HeavyTurnRate);
-        
+
 		MoveUpdatedComponent(FVector::ZeroVector, NewRotation, false);
 	}
-
-	// C. Calculate Velocity (Newtonian Physics)
-	// Velocity += Acceleration * dt
-
-	// Are we trying to move?
-	bool bHasInput = !InputVector.IsNearlyZero();
-    
+	
 	FVector CurrentVelocity = Velocity;
 	FVector AppliedForce = FVector::ZeroVector;
 
 	if (bHasInput)
 	{
-		// Add Acceleration in the direction of INPUT (or facing, depending on preference)
-		// Using InputVector makes it responsive. Using GetActorForwardVector() makes it "tank controls".
-
 		float SurfaceMult = 1.0f;
-		if (CurrentFloor.IsWalkableFloor()) {
-			// Read Physical Material from the hit result
-			UPhysicalMaterial* PhysMat = CurrentFloor.HitResult.PhysMaterial.Get();
-			if (PhysMat) SurfaceMult = PhysMat->Friction; // Or a custom lookup table
-		}
-		
-		// Apply to acceleration logic
+		// if (CurrentFloor.IsWalkableFloor()) 
+		// {
+		//    // Dynamic traction based on the physical material of the floor
+		//    UPhysicalMaterial* PhysMat = CurrentFloor.HitResult.PhysMaterial.Get();
+		//    if (PhysMat) SurfaceMult = PhysMat->Friction;
+		// }
+
+		// Acceleration Force
 		AppliedForce = InputVector * HeavyAcceleration * SurfaceMult;
+		UE_LOG(LogTemp, Warning, TEXT("AppliedForce: %s"), *AppliedForce.ToString());
 	}
 	else
 	{
-		/**
-		 *
-		* Practical Example
-		* Imagine:
-		* Current velocity = 100 units/second forward
-		* Applied force = -150 units/second² (braking)
-		* deltaTime = 0.016 seconds (60 FPS)
-		* Left side: ( -150 * 0.016 )² = ( -2.4 )² = 5.76 Right side: 100² = 10,000
-		*
-		* Since 5.76 < 10,000, the condition is false - we continue braking.
-		*
-		* But if:
-		* Current velocity = 2 units/second forward
-		*
-		*
-		* Same braking force and deltaTime
-		* Left side: 5.76 (same) Right side: 2² = 4
-		*  Since 5.76 > 4, the condition is true - we'd overshoot zero, so we stop immediately.
-		 *
-		 */
-		
-		// Braking / Friction
-		// If no input, apply a force opposite to velocity
+		// Braking / Friction Force
 		if (!CurrentVelocity.IsNearlyZero())
 		{
 			FVector FrictionDir = -CurrentVelocity.GetSafeNormal();
 			AppliedForce = FrictionDir * HeavyDeceleration;
-            
-			// Prevent overshoot (jitter at 0 speed)
+
+			// Prevent overshoot: if the braking force would flip direction, just stop.
 			if ((AppliedForce * deltaTime).SizeSquared() > CurrentVelocity.SizeSquared())
 			{
 				CurrentVelocity = FVector::ZeroVector;
 				AppliedForce = FVector::ZeroVector;
 			}
 		}
+	}
 
-		// Apply the force
-		Velocity = CurrentVelocity + (AppliedForce * deltaTime);
+	// --- D. Final Integration & Movement ---
+	// These lines must be outside the 'else' block so the character actually moves!
 
-		// TODO: Clamp to Max Speed (extensible for Encumbrance later)
-		float CurrentMaxSpeed = HeavyMaxSpeed; // * GetEncumbranceMultiplier();
-		if (Velocity.Size() > CurrentMaxSpeed)
-		{
-			Velocity = Velocity.GetSafeNormal() * CurrentMaxSpeed;
-		}
+	// Update Velocity: v = v0 + at
+	Velocity = CurrentVelocity + (AppliedForce * deltaTime);
 
-		// D. Move the Component
-		// SafeMove handles collision, sliding along walls, and stepping up stairs.
-		FVector Delta = Velocity * deltaTime;
-		FHitResult Hit(1.f);
-    
-		SafeMoveUpdatedComponent(Delta, UpdatedComponent->GetComponentRotation(), true, Hit);
+	// Clamp to Max Speed (CurrentMaxSpeed can be modified by encumbrance later)
+	float CurrentMaxSpeed = HeavyMaxSpeed;
+	if (Velocity.Size() > CurrentMaxSpeed)
+	{
+		Velocity = Velocity.GetSafeNormal() * CurrentMaxSpeed;
+	}
 
-		// Handle Wall Sliding
-		if (Hit.IsValidBlockingHit())
-		{
-			HandleImpact(Hit, deltaTime, Delta);
-			SlideAlongSurface(Delta, 1.f - Hit.Time, Hit.Normal, Hit, true);
-		}
+	// Calculate the distance to move this frame
+	FVector Delta = Velocity * deltaTime;
+	FHitResult Hit(1.f);
 
-		// Handle Floor sticking (keep us on the ground)
-		FFindFloorResult FloorResult;
-		FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false);
-		if (FloorResult.IsWalkableFloor())
-		{
-			//TODO: Review Floor snapping
-			// Basic snap-to-floor logic usually goes here or is handled by SafeMove
-			// For simplicity in this snippet, we assume flat ground or simple slopes.
-		}
+	// Use SafeMove to handle collisions and steps automatically
+	SafeMoveUpdatedComponent(Delta, UpdatedComponent->GetComponentRotation(), true, Hit);
+
+	// Handle Wall Sliding / Impacts
+	if (Hit.IsValidBlockingHit())
+	{
+		HandleImpact(Hit, deltaTime, Delta);
+		SlideAlongSurface(Delta, 1.f - Hit.Time, Hit.Normal, Hit, true);
+	}
+
+	// Ground Snapping
+	FFindFloorResult FloorResult;
+	FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false);
+	if (FloorResult.IsWalkableFloor())
+	{
+		// Additional ground-alignment logic can go here if needed
 	}
 }
 
@@ -194,12 +170,14 @@ bool FSavedMove_Heavy::CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* 
 	return Super::CanCombineWith(NewMove, InCharacter, MaxDelta);
 }
 
-void FSavedMove_Heavy::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel, class FNetworkPredictionData_Client_Character& ClientData)
+void FSavedMove_Heavy::SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel,
+                                  class FNetworkPredictionData_Client_Character& ClientData)
 {
 	Super::SetMoveFor(C, InDeltaTime, NewAccel, ClientData);
 }
 
-FNetworkPredictionData_Client_Heavy::FNetworkPredictionData_Client_Heavy(const UCharacterMovementComponent& ClientMovement)
+FNetworkPredictionData_Client_Heavy::FNetworkPredictionData_Client_Heavy(
+	const UCharacterMovementComponent& ClientMovement)
 	: Super(ClientMovement)
 {
 }
