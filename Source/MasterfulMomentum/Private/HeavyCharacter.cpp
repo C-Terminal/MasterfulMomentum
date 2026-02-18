@@ -130,33 +130,26 @@ void AHeavyCharacter::PossessedBy(AController* NewController)
 
 void AHeavyCharacter::HandleMove(const struct FInputActionValue& Value)
 {
-	// If you don't see this Cyan message on your screen, 
-	// the Enhanced Input system is NOT calling this function.
 	GEngine->AddOnScreenDebugMessage(1, 1.f, FColor::Cyan, TEXT("!!! HANDLE MOVE EXECUTING !!!"));
 
-	// ... rest of your code ...
 	FVector2D MovementVector = Value.Get<FVector2D>();
 
 	if (Controller != nullptr)
 	{
-		// Get facing direction based on camera/controller
 		const FRotator Rotation = Controller->GetControlRotation();
 		const FRotator YawRotation(0, Rotation.Yaw, 0);
 
 		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-		// MovementVector.Y is Forward/Back due to your YXZ Swizzle
-		AddMovementInput(ForwardDirection, MovementVector.Y);
-		// MovementVector.X is Left/Right
-		AddMovementInput(RightDirection, MovementVector.X);
-
-		// Debug Log to confirm signal arrival
-		UE_LOG(LogTemp, Log, TEXT("Input Received: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
-
-
-		// NEW: Real-time debug message on your Windows 10 screen
-		GEngine->AddOnScreenDebugMessage(1, 1.f, FColor::Cyan,
-		                                 FString::Printf(TEXT("Current Velocity: %s"), *GetVelocity().ToString()));
+		// Instead of AddMovementInput, set it directly on your custom component
+		if (UHeavyCharacterMovementComponent* HeavyMovement = GetHeavyMovement())
+		{
+			FVector InputDir = (ForwardDirection * MovementVector.Y) + (RightDirection * MovementVector.X);
+			HeavyMovement->CustomInputVector = InputDir;
+            
+			GEngine->AddOnScreenDebugMessage(20, 0.f, FColor::Magenta, 
+				FString::Printf(TEXT("CustomInputVector set to: %s"), *InputDir.ToString()));
+		}
 	}
 }

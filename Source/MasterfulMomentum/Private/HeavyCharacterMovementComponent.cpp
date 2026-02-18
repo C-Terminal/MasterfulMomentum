@@ -34,105 +34,102 @@ void UHeavyCharacterMovementComponent::PhysCustom(float deltaTime, int32 Iterati
 
 void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 Iterations)
 {
-	if (deltaTime < MIN_TICK_TIME) return;
+    if (deltaTime < MIN_TICK_TIME) return;
 
-	// DEBUG: Check BEFORE consuming
-	FVector PendingInput = GetPendingInputVector();
-	UE_LOG(LogTemp, Warning, TEXT("PendingInputVector BEFORE consume: %s"), *PendingInput.ToString());
-
-	FVector InputVector = ConsumeInputVector();
-	UE_LOG(LogTemp, Warning, TEXT("InputVector AFTER consume: %s"), *InputVector.ToString());
+    // Use our custom input instead of ConsumeInputVector
+    FVector InputVector = CustomInputVector;
+    CustomInputVector = FVector::ZeroVector; // Clear it for next frame
     
+    UE_LOG(LogTemp, Warning, TEXT("CustomInputVector: %s"), *InputVector.ToString());
 
+    if (!InputVector.IsNearlyZero())
+    {
+       InputVector = InputVector.GetSafeNormal();
+    }
 
+    bool bHasInput = !InputVector.IsNearlyZero();
+    UE_LOG(LogTemp, Warning, TEXT("bHasInput: %s"), bHasInput ? TEXT("TRUE") : TEXT("FALSE"));
+    
+    // --- B. Calculate Rotation (Heavy Turning) ---
+    if (!InputVector.IsNearlyZero())
+    {
+       FRotator CurrentRotation = UpdatedComponent->GetComponentRotation();
+       FRotator TargetRotation = InputVector.Rotation();
 
-	if (!InputVector.IsNearlyZero())
-	{
-		InputVector = InputVector.GetSafeNormal();
-	}
+       // Use constant interpolation for a "tanky" or heavy human feel
+       FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, TargetRotation, deltaTime, HeavyTurnRate);
 
-	bool bHasInput = !InputVector.IsNearlyZero();
-	UE_LOG(LogTemp, Warning, TEXT("bHasInput: %s"), bHasInput ? TEXT("TRUE") : TEXT("FALSE"));
-	// --- B. Calculate Rotation (Heavy Turning) ---
-	if (!InputVector.IsNearlyZero())
-	{
-		FRotator CurrentRotation = UpdatedComponent->GetComponentRotation();
-		FRotator TargetRotation = InputVector.Rotation();
+       MoveUpdatedComponent(FVector::ZeroVector, NewRotation, false);
+    }
+    
+    FVector CurrentVelocity = Velocity;
+    FVector AppliedForce = FVector::ZeroVector;
 
-		// Use constant interpolation for a "tanky" or heavy human feel
-		FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, TargetRotation, deltaTime, HeavyTurnRate);
+    if (bHasInput)
+    {
+       float SurfaceMult = 1.0f;
+       // if (CurrentFloor.IsWalkableFloor()) 
+       // {
+       //    // Dynamic traction based on the physical material of the floor
+       //    UPhysicalMaterial* PhysMat = CurrentFloor.HitResult.PhysMaterial.Get();
+       //    if (PhysMat) SurfaceMult = PhysMat->Friction;
+       // }
 
-		MoveUpdatedComponent(FVector::ZeroVector, NewRotation, false);
-	}
-	
-	FVector CurrentVelocity = Velocity;
-	FVector AppliedForce = FVector::ZeroVector;
+       // Acceleration Force
+       AppliedForce = InputVector * HeavyAcceleration * SurfaceMult;
+       UE_LOG(LogTemp, Warning, TEXT("AppliedForce: %s"), *AppliedForce.ToString());
+    }
+    else
+    {
+       // Braking / Friction Force
+       if (!CurrentVelocity.IsNearlyZero())
+       {
+          FVector FrictionDir = -CurrentVelocity.GetSafeNormal();
+          AppliedForce = FrictionDir * HeavyDeceleration;
 
-	if (bHasInput)
-	{
-		float SurfaceMult = 1.0f;
-		// if (CurrentFloor.IsWalkableFloor()) 
-		// {
-		//    // Dynamic traction based on the physical material of the floor
-		//    UPhysicalMaterial* PhysMat = CurrentFloor.HitResult.PhysMaterial.Get();
-		//    if (PhysMat) SurfaceMult = PhysMat->Friction;
-		// }
+          // Prevent overshoot: if the braking force would flip direction, just stop.
+          if ((AppliedForce * deltaTime).SizeSquared() > CurrentVelocity.SizeSquared())
+          {
+             CurrentVelocity = FVector::ZeroVector;
+             AppliedForce = FVector::ZeroVector;
+          }
+       }
+    }
 
-		// Acceleration Force
-		AppliedForce = InputVector * HeavyAcceleration * SurfaceMult;
-		UE_LOG(LogTemp, Warning, TEXT("AppliedForce: %s"), *AppliedForce.ToString());
-	}
-	else
-	{
-		// Braking / Friction Force
-		if (!CurrentVelocity.IsNearlyZero())
-		{
-			FVector FrictionDir = -CurrentVelocity.GetSafeNormal();
-			AppliedForce = FrictionDir * HeavyDeceleration;
+    // --- D. Final Integration & Movement ---
+    // These lines must be outside the 'else' block so the character actually moves!
 
-			// Prevent overshoot: if the braking force would flip direction, just stop.
-			if ((AppliedForce * deltaTime).SizeSquared() > CurrentVelocity.SizeSquared())
-			{
-				CurrentVelocity = FVector::ZeroVector;
-				AppliedForce = FVector::ZeroVector;
-			}
-		}
-	}
+    // Update Velocity: v = v0 + at
+    Velocity = CurrentVelocity + (AppliedForce * deltaTime);
 
-	// --- D. Final Integration & Movement ---
-	// These lines must be outside the 'else' block so the character actually moves!
+    // Clamp to Max Speed (CurrentMaxSpeed can be modified by encumbrance later)
+    float CurrentMaxSpeed = HeavyMaxSpeed;
+    if (Velocity.Size() > CurrentMaxSpeed)
+    {
+       Velocity = Velocity.GetSafeNormal() * CurrentMaxSpeed;
+    }
 
-	// Update Velocity: v = v0 + at
-	Velocity = CurrentVelocity + (AppliedForce * deltaTime);
+    // Calculate the distance to move this frame
+    FVector Delta = Velocity * deltaTime;
+    FHitResult Hit(1.f);
 
-	// Clamp to Max Speed (CurrentMaxSpeed can be modified by encumbrance later)
-	float CurrentMaxSpeed = HeavyMaxSpeed;
-	if (Velocity.Size() > CurrentMaxSpeed)
-	{
-		Velocity = Velocity.GetSafeNormal() * CurrentMaxSpeed;
-	}
+    // Use SafeMove to handle collisions and steps automatically
+    SafeMoveUpdatedComponent(Delta, UpdatedComponent->GetComponentRotation(), true, Hit);
 
-	// Calculate the distance to move this frame
-	FVector Delta = Velocity * deltaTime;
-	FHitResult Hit(1.f);
+    // Handle Wall Sliding / Impacts
+    if (Hit.IsValidBlockingHit())
+    {
+       HandleImpact(Hit, deltaTime, Delta);
+       SlideAlongSurface(Delta, 1.f - Hit.Time, Hit.Normal, Hit, true);
+    }
 
-	// Use SafeMove to handle collisions and steps automatically
-	SafeMoveUpdatedComponent(Delta, UpdatedComponent->GetComponentRotation(), true, Hit);
-
-	// Handle Wall Sliding / Impacts
-	if (Hit.IsValidBlockingHit())
-	{
-		HandleImpact(Hit, deltaTime, Delta);
-		SlideAlongSurface(Delta, 1.f - Hit.Time, Hit.Normal, Hit, true);
-	}
-
-	// Ground Snapping
-	FFindFloorResult FloorResult;
-	FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false);
-	if (FloorResult.IsWalkableFloor())
-	{
-		// Additional ground-alignment logic can go here if needed
-	}
+    // Ground Snapping
+    FFindFloorResult FloorResult;
+    FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false);
+    if (FloorResult.IsWalkableFloor())
+    {
+       // Additional ground-alignment logic can go here if needed
+    }
 }
 
 // 3. Network Boilerplate (Crucial for Multiplayer)
