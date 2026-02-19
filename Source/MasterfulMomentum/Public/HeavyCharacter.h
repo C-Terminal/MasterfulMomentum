@@ -81,10 +81,71 @@ protected:
 
 	virtual void PossessedBy(AController* NewController) override;
 
+	// == Stamina System ===
+	/** Maximum stamina pool */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stamina", meta = (ClampMin = "0.0"))
+	float MaxStamina = 100.0f;
+
+	/** Current stamina (replicated for multiplayer) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentStamina, Category = "Stamina")
+	float CurrentStamina = 100.0f;
+
+	/** Stamina drain per second while sprinting */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stamina", meta = (ClampMin = "0.0"))
+	float StaminaDrainRate = 20.0f;
+
+	/** Stamina regeneration per second while not sprinting */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stamina", meta = (ClampMin = "0.0"))
+	float StaminaRegenRate = 15.0f;
+
+	/** Minimum stamina required to start sprinting */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stamina", meta = (ClampMin = "0.0"))
+	float MinStaminaToSprint = 10.0f;
+
+	/** Stamina must reach this threshold to recover from exhaustion */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stamina", meta = (ClampMin = "0.0"))
+	float ExhaustionRecoveryThreshold = 30.0f;
+
+
+	/** Sprint input action */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	class UInputAction* SprintAction;
+
+	/** Called when stamina changes (for UI updates) */
+	UFUNCTION()
+	void OnRep_CurrentStamina();
+
+	/** Input callbacks */
+	void SprintPressed();
+	void SprintReleased();
+
+
+	
 public:	
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
-	// Called to bind functionality to input
+	/** Can the character sprint right now? */
+	UFUNCTION(BlueprintPure, Category = "Stamina")
+	bool CanSprint() const;
+
+	/** Get stamina as a percentage (0-1) for UI */
+	UFUNCTION(BlueprintPure, Category = "Stamina")
+	float GetStaminaPercent() const { return MaxStamina > 0.f ? CurrentStamina / MaxStamina : 0.f; }
+
+	/** Network replication */
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** Is the player exhausted? (replicated) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Stamina")
+	bool bIsExhausted = false;
+
+	/** Does the player want to sprint? (input state) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stamina")
+	bool bWantsToSprint = false;
+
+	/** Update stamina (called by movement component) */
+	void UpdateStamina(float DeltaTime, bool bIsSprinting);
+
 
 };

@@ -6,6 +6,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
+#include "Net/UnrealNetwork.h"
 
 
 class UHeavyCharacterMovementComponent;
@@ -39,6 +40,9 @@ UHeavyCharacterMovementComponent* AHeavyCharacter::GetHeavyMovement() const
 void AHeavyCharacter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Initialize stamina to max
+	CurrentStamina = MaxStamina;
 
 
 	// Verify assets are assigned
@@ -87,6 +91,21 @@ void AHeavyCharacter::Tick(float DeltaTime)
 	{
 		UpdateCameraPan(DeltaTime);
 	}
+
+	// Stamina update is now handled in the movement component
+	// We just keep the debug display here
+#if !UE_BUILD_SHIPPING
+	if (GEngine && CurrentStamina < MaxStamina)
+	{
+		FColor StaminaColor = bIsExhausted
+			                      ? FColor::Red
+			                      : (CurrentStamina < MinStaminaToSprint ? FColor::Orange : FColor::Green);
+		GEngine->AddOnScreenDebugMessage(12, 0.f, StaminaColor,
+		                                 FString::Printf(TEXT("Stamina: %.0f%% %s"),
+		                                                 GetStaminaPercent() * 100.f,
+		                                                 bIsExhausted ? TEXT("[EXHAUSTED]") : TEXT("")));
+	}
+#endif
 }
 
 void AHeavyCharacter::UpdateCameraPan(float DeltaTime)
@@ -230,6 +249,12 @@ void AHeavyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 		{
 			UE_LOG(LogTemp, Error, TEXT("MoveAction is NULL! Check BP Class Defaults."));
 		}
+		if (SprintAction)
+		{
+			EIC->BindAction(SprintAction, ETriggerEvent::Started, this, &AHeavyCharacter::SprintPressed);
+			EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &AHeavyCharacter::SprintReleased);
+			UE_LOG(LogTemp, Warning, TEXT("Successfully bound IA_HeavySprint in C++"));
+		}
 	}
 }
 
@@ -265,4 +290,105 @@ void AHeavyCharacter::HandleMove(const struct FInputActionValue& Value)
 				                                 TEXT("CustomInputVector set to: %s"), *InputDir.ToString()));
 		}
 	}
+}
+
+void AHeavyCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AHeavyCharacter, CurrentStamina);
+	DOREPLIFETIME(AHeavyCharacter, bIsExhausted);
+}
+
+
+void AHeavyCharacter::OnRep_CurrentStamina()
+{
+	// This gets called on clients when stamina replicates
+	// Perfect place to update UI or play audio feedback
+
+#if !UE_BUILD_SHIPPING
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(11, 0.f, FColor::Cyan,
+		                                 FString::Printf(TEXT("Stamina: %.1f / %.1f (%.0f%%)"),
+		                                                 CurrentStamina, MaxStamina, GetStaminaPercent() * 100.f));
+	}
+#endif
+}
+
+void AHeavyCharacter::SprintPressed()
+{
+	bWantsToSprint = true;
+}
+
+void AHeavyCharacter::SprintReleased()
+{
+	bWantsToSprint = false;
+}
+
+void AHeavyCharacter::UpdateStamina(float DeltaTime, bool bIsSprinting)
+{
+	// Only update on server or in single player
+	if (GetLocalRole() != ROLE_Authority)
+	{
+		return;
+	}
+
+	const float OldStamina = CurrentStamina;
+
+	if (bIsSprinting)
+	{
+		// Drain stamina
+		CurrentStamina = FMath::Max(0.f, CurrentStamina - (StaminaDrainRate * DeltaTime));
+
+		// Check for exhaustion
+		if (CurrentStamina <= 0.f && !bIsExhausted)
+		{
+			bIsExhausted = true;
+
+#if !UE_BUILD_SHIPPING
+			GEngine->AddOnScreenDebugMessage(10, 2.f, FColor::Red, TEXT("EXHAUSTED!"));
+#endif
+		}
+	}
+
+	else
+	{
+		// Regenerate stamina
+		CurrentStamina = FMath::Min(MaxStamina, CurrentStamina + (StaminaRegenRate * DeltaTime));
+
+		// Check for recovery from exhaustion
+		if (bIsExhausted && CurrentStamina >= ExhaustionRecoveryThreshold)
+		{
+			bIsExhausted = false;
+
+#if !UE_BUILD_SHIPPING
+			GEngine->AddOnScreenDebugMessage(10, 2.f, FColor::Green, TEXT("Recovered!"));
+#endif
+		}
+	}
+
+	// Optional: Trigger events when stamina changes significantly
+	if (FMath::Abs(OldStamina - CurrentStamina) > 0.01f)
+	{
+		OnRep_CurrentStamina(); // Call manually on server for local feedback
+	}
+}
+
+
+bool AHeavyCharacter::CanSprint() const
+{
+	// Can't sprint if exhausted or don't have minimum stamina
+	if (bIsExhausted || CurrentStamina < MinStaminaToSprint)
+	{
+		return false;
+	}
+
+	// Can't sprint if not grounded (optional - remove if you want air sprinting)
+	if (GetCharacterMovement() && GetCharacterMovement()->MovementMode != MOVE_Custom)
+	{
+		return false;
+	}
+
+	return true;
 }
