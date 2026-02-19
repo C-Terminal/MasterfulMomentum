@@ -50,27 +50,19 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 	bool bHasInput = !InputVector.IsNearlyZero();
 
 	// === SPRINT LOGIC ===
-	// Determine if we're actually sprinting this frame
 	AHeavyCharacter* HeavyChar = Cast<AHeavyCharacter>(CharacterOwner);
 	bool bWantsToSprint = HeavyChar && HeavyChar->bWantsToSprint;
 	bool bCanSprint = HeavyChar && HeavyChar->CanSprint();
 	bool bMovingFastEnough = Velocity.Size() > MinSprintVelocity;
 
-	// You can only sprint if:
-	// 1. You want to sprint (input held)
-	// 2. You're allowed to sprint (have stamina, not exhausted)
-	// 3. You have input to move
-	// 4. You're already moving at minimum speed (prevents standing-still sprint)
 	bool bWasSprintingLastFrame = bIsSprinting;
 	bIsSprinting = bWantsToSprint && bCanSprint && bHasInput && (bMovingFastEnough || bWasSprintingLastFrame);
 
-	// Update stamina based on sprint state
 	if (HeavyChar)
 	{
 		HeavyChar->UpdateStamina(deltaTime, bIsSprinting);
 	}
 
-	// Calculate sprint multipliers
 	float CurrentSpeedMult = bIsSprinting ? SprintSpeedMultiplier : 1.0f;
 	float CurrentAccelMult = bIsSprinting ? SprintAccelerationMultiplier : 1.0f;
 	float CurrentTurnMult = bIsSprinting ? SprintTurnRateMultiplier : 1.0f;
@@ -81,7 +73,6 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 		FRotator CurrentRotation = UpdatedComponent->GetComponentRotation();
 		FRotator TargetRotation = InputVector.Rotation();
 
-		// Apply sprint turn rate modifier
 		float EffectiveTurnRate = HeavyTurnRate * CurrentTurnMult;
 
 		FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, TargetRotation, deltaTime, EffectiveTurnRate);
@@ -94,12 +85,17 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 
 	if (bHasInput)
 	{
-		//TODO: make this dynamic based on surface type
 		float SurfaceMult = 1.0f;
-
 		float EffectiveAcceleration = HeavyAcceleration * CurrentAccelMult;
 
-		AppliedForce = InputVector * EffectiveAcceleration * SurfaceMult;
+		// THE FIX: Angle the input parallel to the current floor so we don't push "into" the ramp
+		FVector SlopeInput = InputVector;
+		if (CurrentFloor.IsWalkableFloor() && CurrentFloor.HitResult.Normal.Z > KINDA_SMALL_NUMBER)
+		{
+			SlopeInput = FVector::VectorPlaneProject(InputVector, CurrentFloor.HitResult.Normal).GetSafeNormal();
+		}
+
+		AppliedForce = SlopeInput * EffectiveAcceleration * SurfaceMult;
 
 #if !UE_BUILD_SHIPPING
 		if (bIsSprinting)
@@ -127,7 +123,6 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 	// --- C. Update Velocity ---
 	Velocity = CurrentVelocity + (AppliedForce * deltaTime);
 
-	// Apply sprint speed multiplier to max speed
 	float CurrentMaxSpeed = HeavyMaxSpeed * CurrentSpeedMult;
 
 	if (Velocity.Size() > CurrentMaxSpeed)
@@ -136,41 +131,42 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 	}
 
 	// --- D. Perform Movement ---
-	//TODO: See if this needs to be put back in section E
-	MaintainHorizontalGroundVelocity();
+	// Store our speed before moving to prevent bleed on geometric transitions
+	float OriginalSpeed = Velocity.Size();
 
 	FVector Delta = Velocity * deltaTime;
 	FHitResult Hit(1.f);
 
 	SafeMoveUpdatedComponent(Delta, UpdatedComponent->GetComponentRotation(), true, Hit);
 
-	// Handle Wall Sliding
+	// Handle Wall Sliding & Transitions
 	if (Hit.IsValidBlockingHit())
 	{
 		HandleImpact(Hit, deltaTime, Delta);
 		SlideAlongSurface(Delta, 1.f - Hit.Time, Hit.Normal, Hit, true);
+
+		// Prevent speed-bleed when hitting the seam between flat ground and a slope
+		if (Hit.Normal.Z > 0.7f)
+		{
+			Velocity = Velocity.GetSafeNormal() * OriginalSpeed;
+		}
 	}
 
 	// --- E. FLOOR SNAPPING & LEDGE DETECTION ---
-	// Find floor beneath us
 	FFindFloorResult FloorResult;
 	FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false, nullptr);
 
-	// Update the cached floor
 	CurrentFloor = FloorResult;
 
 	if (FloorResult.IsWalkableFloor())
 	{
-		// Reset coyote time when we have valid ground
 		TimeSinceLastValidFloor = 0.f;
 
-		// We found a valid floor - check if we need to step down to it
 		const float FloorDist = FloorResult.GetDistanceToFloor();
-		const float MaxStepDownHeight = MaxStepHeight; // Use base class variable
+		const float MaxStepDownHeight = MaxStepHeight;
 
 		if (FloorDist > KINDA_SMALL_NUMBER && FloorDist <= MaxStepDownHeight)
 		{
-			// Step down to maintain contact with the ground
 			const FVector DownVector = FVector(0.f, 0.f, -FloorDist);
 			FHitResult StepDownHit(1.f);
 
@@ -180,6 +176,9 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 			{
 				const float VelZ = Velocity.Z;
 				Velocity = FVector::VectorPlaneProject(Velocity, StepDownHit.Normal);
+
+				// Restore speed after projecting onto the down-slope
+				Velocity = Velocity.GetSafeNormal() * OriginalSpeed;
 
 				if (VelZ < 0.f)
 				{
@@ -197,18 +196,13 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 	}
 	else
 	{
-		// No walkable floor found - START COYOTE TIME
 		TimeSinceLastValidFloor += deltaTime;
-
 		const float DistanceToFloor = FloorResult.GetDistanceToFloor();
 
-		// Only fall if we've exceeded coyote time AND the drop is significant
 		if (TimeSinceLastValidFloor > LedgeGraceTime &&
 			(DistanceToFloor > MaxStepHeight || !FloorResult.bBlockingHit))
 		{
-			// Cancel sprint when falling
 			bIsSprinting = false;
-
 			SetMovementMode(MOVE_Falling);
 
 #if !UE_BUILD_SHIPPING
@@ -216,6 +210,8 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 #endif
 		}
 	}
+
+	
 }
 
 void UHeavyCharacterMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode,
