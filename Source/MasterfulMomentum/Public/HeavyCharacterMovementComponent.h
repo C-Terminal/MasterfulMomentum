@@ -21,7 +21,7 @@ UCLASS()
 class MASTERFULMOMENTUM_API UHeavyCharacterMovementComponent : public UCharacterMovementComponent
 {
 	GENERATED_BODY()
-	
+
 public:
 	UHeavyCharacterMovementComponent();
 	// --- Configuration ---
@@ -37,8 +37,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement")
 	float HeavyTurnRate = 120.f; // Degrees per second
 
+	/** Allow small air time over bumps before snapping (coyote time in seconds) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement|Ground")
+	float LedgeGraceTime = 0.1f;
+
+	/** Should velocity be preserved when stepping down slopes? */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement|Ground")
+	bool bPreserveSlopeMomentum = true;
 	UPROPERTY()
 	FVector CustomInputVector;
+private:
+	/** Time since we last had valid ground (for coyote time) */
+	float TimeSinceLastValidFloor = 0.f;
+
+
 
 protected:
 	// --- Core CMC Overrides ---
@@ -49,39 +61,42 @@ protected:
 	virtual void UpdateFromCompressedFlags(uint8 Flags) override;
 	virtual class FNetworkPredictionData_Client* GetPredictionData_Client() const override;
 
+	/** Called when movement mode changes */
+	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
+    
+	/** Handle landing logic */
+	virtual void ProcessLanded(const FHitResult& Hit, float remainingTime, int32 Iterations) override;
+
 public:
 	// Helper to switch modes easily
 	UFUNCTION(BlueprintCallable, Category = "Heavy Movement")
 	void SetHeavyModeEnabled(bool bEnabled);
 };
-	//// --- Networking Support Structs ---
-	class FSavedMove_Heavy : public FSavedMove_Character
-	{
-	public:
-		typedef FSavedMove_Character Super;
 
-		// Check if new move is same as old (optimization)
-		virtual bool CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter, float MaxDelta) const override;
-    
-		// Pack data for server
-		virtual uint8 GetCompressedFlags() const override;
-    
-		// Unpack data on server
-		virtual void SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel, class FNetworkPredictionData_Client_Character& ClientData) override;
-    
-		// Reset
-		virtual void Clear() override;
-	};
+//// --- Networking Support Structs ---
+class FSavedMove_Heavy : public FSavedMove_Character
+{
+public:
+	typedef FSavedMove_Character Super;
 
-	class FNetworkPredictionData_Client_Heavy : public FNetworkPredictionData_Client_Character
-	{
-	public:
-		typedef FNetworkPredictionData_Client_Character Super;
-		FNetworkPredictionData_Client_Heavy(const UCharacterMovementComponent& ClientMovement);
-		virtual FSavedMovePtr AllocateNewMove() override;
-	};
+	// Check if new move is same as old (optimization)
+	virtual bool CanCombineWith(const FSavedMovePtr& NewMove, ACharacter* InCharacter, float MaxDelta) const override;
 
+	// Pack data for server
+	virtual uint8 GetCompressedFlags() const override;
 
+	// Unpack data on server
+	virtual void SetMoveFor(ACharacter* C, float InDeltaTime, FVector const& NewAccel,
+	                        class FNetworkPredictionData_Client_Character& ClientData) override;
 
+	// Reset
+	virtual void Clear() override;
+};
 
-
+class FNetworkPredictionData_Client_Heavy : public FNetworkPredictionData_Client_Character
+{
+public:
+	typedef FNetworkPredictionData_Client_Character Super;
+	FNetworkPredictionData_Client_Heavy(const UCharacterMovementComponent& ClientMovement);
+	virtual FSavedMovePtr AllocateNewMove() override;
+};
