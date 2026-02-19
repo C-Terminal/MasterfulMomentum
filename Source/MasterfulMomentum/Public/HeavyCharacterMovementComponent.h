@@ -46,6 +46,28 @@ public:
 	bool bPreserveSlopeMomentum = true;
 	UPROPERTY()
 	FVector CustomInputVector;
+
+	// === Sprint System ===
+    
+	/** Sprint speed multiplier (applied to HeavyMaxSpeed) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement|Sprint", meta = (ClampMin = "1.0"))
+	float SprintSpeedMultiplier = 1.5f;
+
+	/** Sprint acceleration multiplier */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement|Sprint", meta = (ClampMin = "1.0"))
+	float SprintAccelerationMultiplier = 1.3f;
+
+	/** How much faster character turns while sprinting (multiplier) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement|Sprint", meta = (ClampMin = "0.5"))
+	float SprintTurnRateMultiplier = 0.7f; // Slower turning while sprinting feels more realistic
+
+	/** Minimum velocity to maintain sprint (prevents sprint-spam while standing still) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement|Sprint")
+	float MinSprintVelocity = 50.0f;
+
+	/** Is character currently sprinting? (determined by movement component) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Heavy Movement|Sprint")
+	bool bIsSprinting = false;
 private:
 	/** Time since we last had valid ground (for coyote time) */
 	float TimeSinceLastValidFloor = 0.f;

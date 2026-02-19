@@ -2,6 +2,8 @@
 
 #include "MasterfulMomentum/Public/HeavyCharacterMovementComponent.h"
 
+#include "HeavyCharacter.h"
+
 UHeavyCharacterMovementComponent::UHeavyCharacterMovementComponent()
 {
 	// Enable parameters ensuring we can't turn instantly
@@ -47,12 +49,42 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 
 	bool bHasInput = !InputVector.IsNearlyZero();
 
+	// === SPRINT LOGIC ===
+	// Determine if we're actually sprinting this frame
+	AHeavyCharacter* HeavyChar = Cast<AHeavyCharacter>(CharacterOwner);
+	bool bWantsToSprint = HeavyChar && HeavyChar->bWantsToSprint;
+	bool bCanSprint = HeavyChar && HeavyChar->CanSprint();
+	bool bMovingFastEnough = Velocity.Size() > MinSprintVelocity;
+
+	// You can only sprint if:
+	// 1. You want to sprint (input held)
+	// 2. You're allowed to sprint (have stamina, not exhausted)
+	// 3. You have input to move
+	// 4. You're already moving at minimum speed (prevents standing-still sprint)
+	bool bWasSprintingLastFrame = bIsSprinting;
+	bIsSprinting = bWantsToSprint && bCanSprint && bHasInput && (bMovingFastEnough || bWasSprintingLastFrame);
+
+	// Update stamina based on sprint state
+	if (HeavyChar)
+	{
+		HeavyChar->UpdateStamina(deltaTime, bIsSprinting);
+	}
+
+	// Calculate sprint multipliers
+	float CurrentSpeedMult = bIsSprinting ? SprintSpeedMultiplier : 1.0f;
+	float CurrentAccelMult = bIsSprinting ? SprintAccelerationMultiplier : 1.0f;
+	float CurrentTurnMult = bIsSprinting ? SprintTurnRateMultiplier : 1.0f;
+
 	// --- A. Calculate Rotation (Heavy Turning) ---
 	if (!InputVector.IsNearlyZero())
 	{
 		FRotator CurrentRotation = UpdatedComponent->GetComponentRotation();
 		FRotator TargetRotation = InputVector.Rotation();
-		FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, TargetRotation, deltaTime, HeavyTurnRate);
+
+		// Apply sprint turn rate modifier
+		float EffectiveTurnRate = HeavyTurnRate * CurrentTurnMult;
+
+		FRotator NewRotation = FMath::RInterpConstantTo(CurrentRotation, TargetRotation, deltaTime, EffectiveTurnRate);
 		MoveUpdatedComponent(FVector::ZeroVector, NewRotation, false);
 	}
 
@@ -62,8 +94,19 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 
 	if (bHasInput)
 	{
+		//TODO: make this dynamic based on surface type
 		float SurfaceMult = 1.0f;
-		AppliedForce = InputVector * HeavyAcceleration * SurfaceMult;
+
+		float EffectiveAcceleration = HeavyAcceleration * CurrentAccelMult;
+
+		AppliedForce = InputVector * EffectiveAcceleration * SurfaceMult;
+
+#if !UE_BUILD_SHIPPING
+		if (bIsSprinting)
+		{
+			GEngine->AddOnScreenDebugMessage(13, 0.f, FColor::Yellow, TEXT("SPRINTING"));
+		}
+#endif
 	}
 	else
 	{
@@ -84,13 +127,18 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 	// --- C. Update Velocity ---
 	Velocity = CurrentVelocity + (AppliedForce * deltaTime);
 
-	float CurrentMaxSpeed = HeavyMaxSpeed;
+	// Apply sprint speed multiplier to max speed
+	float CurrentMaxSpeed = HeavyMaxSpeed * CurrentSpeedMult;
+
 	if (Velocity.Size() > CurrentMaxSpeed)
 	{
 		Velocity = Velocity.GetSafeNormal() * CurrentMaxSpeed;
 	}
 
 	// --- D. Perform Movement ---
+	//TODO: See if this needs to be put back in section E
+	MaintainHorizontalGroundVelocity();
+
 	FVector Delta = Velocity * deltaTime;
 	FHitResult Hit(1.f);
 
@@ -104,8 +152,6 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 	}
 
 	// --- E. FLOOR SNAPPING & LEDGE DETECTION ---
-	MaintainHorizontalGroundVelocity();
-
 	// Find floor beneath us
 	FFindFloorResult FloorResult;
 	FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false, nullptr);
@@ -160,6 +206,9 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 		if (TimeSinceLastValidFloor > LedgeGraceTime &&
 			(DistanceToFloor > MaxStepHeight || !FloorResult.bBlockingHit))
 		{
+			// Cancel sprint when falling
+			bIsSprinting = false;
+
 			SetMovementMode(MOVE_Falling);
 
 #if !UE_BUILD_SHIPPING
