@@ -73,7 +73,7 @@ void AHeavyCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	
+
 	if (GetCharacterMovement())
 	{
 		EMovementMode CurrentMode = GetCharacterMovement()->MovementMode;
@@ -83,7 +83,119 @@ void AHeavyCharacter::Tick(float DeltaTime)
 			                                 TEXT("MovementMode: %d, CustomMode: %d"), CurrentMode, CustomMode));
 	}
 
-	// ForceMovement();
+	if (bEnableCameraPanning)
+	{
+		UpdateCameraPan(DeltaTime);
+	}
+}
+
+void AHeavyCharacter::UpdateCameraPan(float DeltaTime)
+{
+	if (!CameraBoom || !FollowCamera)
+	{
+		return;
+	}
+
+	// Get normalized mouse position
+	FVector2D NormalizedMouse;
+	if (!GetNormalizedMousePosition(NormalizedMouse))
+	{
+		// If we can't get mouse position, smoothly return camera to center
+		CurrentCameraOffset = FMath::VInterpTo(CurrentCameraOffset, FVector::ZeroVector, DeltaTime, CameraPanSpeed);
+		CameraBoom->SocketOffset = CurrentCameraOffset;
+		return;
+	}
+
+	// Apply dead zone
+	FVector2D PanInput = NormalizedMouse;
+	if (FMath::Abs(PanInput.X) < CameraPanDeadZone)
+	{
+		PanInput.X = 0.0f;
+	}
+	else
+	{
+		PanInput.X = (FMath::Abs(PanInput.X) - CameraPanDeadZone) / (1.0f - CameraPanDeadZone) *
+			FMath::Sign(PanInput.X);
+	}
+
+	if (FMath::Abs(PanInput.Y) < CameraPanDeadZone)
+	{
+		PanInput.Y = 0.0f;
+	}
+	else
+	{
+		PanInput.Y = (FMath::Abs(PanInput.Y) - CameraPanDeadZone) / (1.0f - CameraPanDeadZone) *
+			FMath::Sign(PanInput.Y);
+	}
+
+	// === FIXED: Use Controller/Camera rotation, not character rotation ===
+
+	// Get the controller's yaw rotation (or camera's fixed rotation if you prefer)
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+
+	const FRotator ControlRotation = PC->GetControlRotation();
+
+	// Get right and forward vectors based on CAMERA view, not character facing
+	FVector CameraRight = FRotationMatrix(FRotator(0, ControlRotation.Yaw, 0)).GetUnitAxis(EAxis::Y);
+	FVector CameraForward = FRotationMatrix(FRotator(0, ControlRotation.Yaw, 0)).GetUnitAxis(EAxis::X);
+
+	// Calculate desired offset in world space
+	// Screen X = Camera Right, Screen Y (inverted) = Camera Forward
+	FVector DesiredOffset = (CameraRight * PanInput.X * MaxCameraPanDistance) +
+		(CameraForward * -PanInput.Y * MaxCameraPanDistance);
+
+	// Smoothly interpolate to desired offset
+	CurrentCameraOffset = FMath::VInterpTo(CurrentCameraOffset, DesiredOffset, DeltaTime, CameraPanSpeed);
+
+	// Apply to spring arm
+	CameraBoom->SocketOffset = CurrentCameraOffset;
+
+	// Optional: Debug visualization
+#if !UE_BUILD_SHIPPING
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(50, 0.0f, FColor::Cyan,
+		                                 FString::Printf(TEXT("Camera Offset: %s"), *CurrentCameraOffset.ToString()));
+		GEngine->AddOnScreenDebugMessage(51, 0.0f, FColor::Yellow,
+		                                 FString::Printf(
+			                                 TEXT("Mouse Normalized: X=%.2f Y=%.2f"), NormalizedMouse.X,
+			                                 NormalizedMouse.Y));
+	}
+#endif
+}
+
+bool AHeavyCharacter::GetNormalizedMousePosition(FVector2D& OutNormalizedPosition) const
+{
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return false;
+	}
+
+	float MouseX, MouseY;
+	if (!PC->GetMousePosition(MouseX, MouseY))
+	{
+		return false;
+	}
+
+	// Get viewport size
+	int32 ViewportSizeX, ViewportSizeY;
+	PC->GetViewportSize(ViewportSizeX, ViewportSizeY);
+
+	if (ViewportSizeX <= 0 || ViewportSizeY <= 0)
+	{
+		return false;
+	}
+
+	// Normalize to [-1, 1] range with (0,0) at screen center
+	OutNormalizedPosition.X = (MouseX / (float)ViewportSizeX - 0.5f) * 2.0f;
+	OutNormalizedPosition.Y = (MouseY / (float)ViewportSizeY - 0.5f) * 2.0f;
+
+	return true;
 }
 
 // Called to bind functionality to input
@@ -147,9 +259,10 @@ void AHeavyCharacter::HandleMove(const struct FInputActionValue& Value)
 		{
 			FVector InputDir = (ForwardDirection * MovementVector.Y) + (RightDirection * MovementVector.X);
 			HeavyMovement->CustomInputVector = InputDir;
-            
-			GEngine->AddOnScreenDebugMessage(20, 0.f, FColor::Magenta, 
-				FString::Printf(TEXT("CustomInputVector set to: %s"), *InputDir.ToString()));
+
+			GEngine->AddOnScreenDebugMessage(20, 0.f, FColor::Magenta,
+			                                 FString::Printf(
+				                                 TEXT("CustomInputVector set to: %s"), *InputDir.ToString()));
 		}
 	}
 }
