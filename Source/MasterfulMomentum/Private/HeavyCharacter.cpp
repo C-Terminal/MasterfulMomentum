@@ -44,6 +44,8 @@ void AHeavyCharacter::BeginPlay()
 	// Initialize stamina to max
 	CurrentStamina = MaxStamina;
 
+	// Initialize rotation tracking
+	PreviousRotation = GetActorRotation();
 
 	// Verify assets are assigned
 	UE_LOG(LogTemp, Warning, TEXT("MoveAction valid: %s"), MoveAction ? TEXT("YES") : TEXT("NO"));
@@ -72,6 +74,32 @@ void AHeavyCharacter::ForceMovement()
 	};
 }
 
+void AHeavyCharacter::UpdateRotationTracking(float DeltaTime)
+{
+	if (DeltaTime <= 0.f)
+	{
+		return;
+	}
+
+	// Get current rotation
+	FRotator CurrentRotation = GetActorRotation();
+
+	// Calculate yaw difference from last frame
+	float YawDifference = CurrentRotation.Yaw - PreviousRotation.Yaw;
+
+	// Normalize to [-180, 180] range (handles wrapping at 360/-360)
+	YawDifference = FMath::UnwindDegrees(YawDifference);
+
+	// Convert to degrees per second
+	YawDelta = YawDifference / DeltaTime;
+
+	// Store absolute value for animation blending (turn speed regardless of direction)
+	AbsYawDelta = FMath::Abs(YawDelta);
+
+	// Cache current rotation for next frame
+	PreviousRotation = CurrentRotation;
+}
+
 // Called every frame
 void AHeavyCharacter::Tick(float DeltaTime)
 {
@@ -92,6 +120,9 @@ void AHeavyCharacter::Tick(float DeltaTime)
 		UpdateCameraPan(DeltaTime);
 	}
 
+	// Update rotation tracking for animations
+	UpdateRotationTracking(DeltaTime);
+
 	// Stamina update is now handled in the movement component
 	// We just keep the debug display here
 #if !UE_BUILD_SHIPPING
@@ -104,6 +135,12 @@ void AHeavyCharacter::Tick(float DeltaTime)
 		                                 FString::Printf(TEXT("Stamina: %.0f%% %s"),
 		                                                 GetStaminaPercent() * 100.f,
 		                                                 bIsExhausted ? TEXT("[EXHAUSTED]") : TEXT("")));
+	}
+	// Debug yaw delta
+	if (AbsYawDelta > 1.0f) // Only show when turning
+	{
+		GEngine->AddOnScreenDebugMessage(14, 0.f, FColor::Magenta,
+		                                 FString::Printf(TEXT("Yaw Delta: %.1f deg/s"), YawDelta));
 	}
 #endif
 }

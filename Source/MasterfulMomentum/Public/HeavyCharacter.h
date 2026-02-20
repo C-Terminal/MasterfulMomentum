@@ -119,7 +119,13 @@ protected:
 	void SprintPressed();
 	void SprintReleased();
 
-
+	// === Animation Data ===
+    
+	/** Actor's yaw rotation from previous frame (for turn-in-place) */
+	FRotator PreviousRotation;
+    
+	/** Update rotation tracking for animation */
+	void UpdateRotationTracking(float DeltaTime);
 	
 public:	
 	// Called every frame
@@ -148,4 +154,12 @@ public:
 	void UpdateStamina(float DeltaTime, bool bIsSprinting);
 
 
+	// === Anim Data ===
+	/** How fast character is turning (degrees per second) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+	float YawDelta = 0.f;
+    
+	/** Absolute yaw speed for animation (always positive) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+	float AbsYawDelta = 0.f;
 };
