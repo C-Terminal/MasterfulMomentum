@@ -33,12 +33,15 @@ public:
 	class UCameraComponent* FollowCamera;
 	// A pointer to your IMC asset so you can assign it in the Editor
 	
+	// === Combat Stance ===
 	
 	/** Is character in combat stance? (RMB held) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
 	bool bIsInCombatStance = false;
 
-
+	/** Speed multiplier when moving in combat stance (0.3 = 30% of normal speed) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float CombatMovementSpeedMultiplier = 0.4f;
 	/** Should character face mouse cursor? */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	bool bFaceMouseCursor = false;

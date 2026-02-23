@@ -131,10 +131,10 @@ void AHeavyCharacter::Tick(float DeltaTime)
 		NewRotation.Yaw += TurnInput * ManualTurnRate * DeltaTime;
 		SetActorRotation(NewRotation);
 	}
-	
+
 	// Update mouse-based facing
 	UpdateMouseFacing(DeltaTime);
-	
+
 	// Stamina update is now handled in the movement component
 	// We just keep the debug display here
 #if !UE_BUILD_SHIPPING
@@ -329,12 +329,12 @@ void AHeavyCharacter::HandleTurn(const FInputActionValue& Value)
 {
 	// Get turn input (-1 to 1, where -1 = left, 1 = right)
 	TurnInput = Value.Get<float>();
-    
+
 #if !UE_BUILD_SHIPPING
 	if (TurnInput != 0.f)
 	{
 		GEngine->AddOnScreenDebugMessage(15, 0.f, FColor::Orange,
-			FString::Printf(TEXT("Turn Input: %.2f"), TurnInput));
+		                                 FString::Printf(TEXT("Turn Input: %.2f"), TurnInput));
 	}
 #endif
 }
@@ -353,16 +353,24 @@ void AHeavyCharacter::HandleMove(const struct FInputActionValue& Value)
 		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-		// Instead of AddMovementInput, set it directly on your custom component
 		if (UHeavyCharacterMovementComponent* HeavyMovement = GetHeavyMovement())
 		{
 			FVector InputDir = (ForwardDirection * MovementVector.Y) + (RightDirection * MovementVector.X);
 			HeavyMovement->CustomInputVector = InputDir;
 
+#if !UE_BUILD_SHIPPING
 			GEngine->AddOnScreenDebugMessage(20, 0.f, FColor::Magenta,
 			                                 FString::Printf(
 				                                 TEXT("CustomInputVector set to: %s"), *InputDir.ToString()));
+#endif
 		}
+
+		UE_LOG(LogTemp, Log, TEXT("Input Received: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
+
+#if !UE_BUILD_SHIPPING
+		GEngine->AddOnScreenDebugMessage(1, 1.f, FColor::Cyan,
+		                                 FString::Printf(TEXT("Current Velocity: %s"), *GetVelocity().ToString()));
+#endif
 	}
 }
 
@@ -394,7 +402,7 @@ void AHeavyCharacter::CombatStancePressed()
 {
 	bIsInCombatStance = true;
 	bFaceMouseCursor = true;
-    
+
 #if !UE_BUILD_SHIPPING
 	GEngine->AddOnScreenDebugMessage(16, 2.f, FColor::Red, TEXT("COMBAT STANCE"));
 #endif
@@ -412,32 +420,32 @@ void AHeavyCharacter::UpdateMouseFacing(float DeltaTime)
 	{
 		return;
 	}
-    
+
 	APlayerController* PC = Cast<APlayerController>(GetController());
 	if (!PC)
 	{
 		return;
 	}
-    
+
 	// Get mouse position in world space
 	FHitResult HitResult;
 	PC->GetHitResultUnderCursor(ECC_Visibility, false, HitResult);
-    
+
 	if (HitResult.bBlockingHit)
 	{
 		// Calculate direction to mouse cursor
 		FVector ToMouse = HitResult.Location - GetActorLocation();
 		ToMouse.Z = 0.f; // Keep rotation on horizontal plane
-        
+
 		if (!ToMouse.IsNearlyZero())
 		{
 			FRotator TargetRotation = ToMouse.Rotation();
 			FRotator CurrentRotation = GetActorRotation();
-            
+
 			// Smoothly rotate towards mouse (faster than normal turning for responsiveness)
-			FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, 
-													DeltaTime, 10.0f); // Fast rotation
-            
+			FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation,
+			                                        DeltaTime, 10.0f); // Fast rotation
+
 			SetActorRotation(NewRotation);
 		}
 	}
