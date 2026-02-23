@@ -33,6 +33,16 @@ public:
 	class UCameraComponent* FollowCamera;
 	// A pointer to your IMC asset so you can assign it in the Editor
 	
+	
+	/** Is character in combat stance? (RMB held) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	bool bIsInCombatStance = false;
+
+
+	/** Should character face mouse cursor? */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	bool bFaceMouseCursor = false;
+    
 protected:
 	// === General ===
 	virtual void BeginPlay() override;
@@ -81,6 +91,33 @@ protected:
 
 	virtual void PossessedBy(AController* NewController) override;
 
+	
+	// === Turn Input ===
+    
+	/** Input action for turning (arrow keys) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* TurnAction;
+    
+	/** Desired turn direction from input (-1 = left, 1 = right, 0 = none) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input")
+	float TurnInput = 0.f;
+    
+	/** How fast to turn when using arrow keys (degrees per second) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float ManualTurnRate = 180.0f;
+    
+	void HandleTurn(const FInputActionValue& Value);
+	
+	// === Combat Stance ===
+
+	/** Input action for combat stance */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* CombatStanceAction;
+
+	void CombatStancePressed();
+	void CombatStanceReleased();
+	void UpdateMouseFacing(float DeltaTime);
+	
 	// == Stamina System ===
 	/** Maximum stamina pool */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stamina", meta = (ClampMin = "0.0"))

@@ -74,6 +74,10 @@ protected:
     /** Is the character currently sprinting? */
     UPROPERTY(BlueprintReadOnly, Category = "Movement")
     bool bIsSprinting = false;
+    
+    /** Is Character in combat/ready stance? */
+    UPROPERTY(BlueprintReadOnly, Category= "Combat")
+    bool bIsInCombatStance = false;
 
     // === Rotation ===
     

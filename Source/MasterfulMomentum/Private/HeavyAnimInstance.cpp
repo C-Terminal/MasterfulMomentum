@@ -68,7 +68,7 @@ void UHeavyAnimInstance::UpdateAnimationData(float DeltaSeconds)
         return; // Still no pawn, wait for next frame
     }
 
-    // If we have a pawn but it's not cached as HeavyCharacter yet, try to cast
+    // If we have a pawn, but it's not cached as HeavyCharacter yet, try to cast
     if (!HeavyCharacter)
     {
         HeavyCharacter = Cast<AHeavyCharacter>(OwningPawn);
@@ -132,15 +132,27 @@ void UHeavyAnimInstance::UpdateAnimationData(float DeltaSeconds)
     YawDelta = HeavyCharacter->YawDelta;
     AbsYawDelta = HeavyCharacter->AbsYawDelta;
     
-    // Determine if should play turn-in-place
-    // Only turn-in-place when: not moving, turning fast enough, and on ground
-    bShouldTurnInPlace = !bIsMoving && !bIsInAir && (AbsYawDelta > TurnInPlaceThreshold);
+    // Get combat stance
+    bIsInCombatStance = HeavyCharacter->bIsInCombatStance;
+    
+    // Modify turn-in-place behavior for combat stance
+    // In combat stance, always face mouse, so turn-in-place is more aggressive
+    if (bIsInCombatStance)
+    {
+        bShouldTurnInPlace = AbsYawDelta > 30.0f; // Lower threshold
+    }
+    else
+    {
+        bShouldTurnInPlace = !bIsMoving && !bIsInAir && (AbsYawDelta > TurnInPlaceThreshold);
+    }
     
     // === Update Stamina Data ===
     
     StaminaPercent = HeavyCharacter->GetStaminaPercent();
     bIsExhausted = HeavyCharacter->bIsExhausted;
     bIsStaminaLow = StaminaPercent < LowStaminaThreshold;
+    
+    
     
     #if !UE_BUILD_SHIPPING && 0 // Set to 1 to enable verbose animation debugging
     if (GEngine)

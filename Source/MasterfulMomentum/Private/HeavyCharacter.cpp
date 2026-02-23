@@ -123,6 +123,18 @@ void AHeavyCharacter::Tick(float DeltaTime)
 	// Update rotation tracking for animations
 	UpdateRotationTracking(DeltaTime);
 
+	// NEW: Apply manual turning
+	if (FMath::Abs(TurnInput) > 0.01f)
+	{
+		FRotator CurrentRotation = GetActorRotation();
+		FRotator NewRotation = CurrentRotation;
+		NewRotation.Yaw += TurnInput * ManualTurnRate * DeltaTime;
+		SetActorRotation(NewRotation);
+	}
+	
+	// Update mouse-based facing
+	UpdateMouseFacing(DeltaTime);
+	
 	// Stamina update is now handled in the movement component
 	// We just keep the debug display here
 #if !UE_BUILD_SHIPPING
@@ -292,6 +304,17 @@ void AHeavyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 			EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &AHeavyCharacter::SprintReleased);
 			UE_LOG(LogTemp, Warning, TEXT("Successfully bound IA_HeavySprint in C++"));
 		}
+		// NEW: Turn input
+		if (TurnAction)
+		{
+			EIC->BindAction(TurnAction, ETriggerEvent::Triggered, this, &AHeavyCharacter::HandleTurn);
+			EIC->BindAction(TurnAction, ETriggerEvent::Completed, this, &AHeavyCharacter::HandleTurn);
+		}
+		if (CombatStanceAction)
+		{
+			EIC->BindAction(CombatStanceAction, ETriggerEvent::Started, this, &AHeavyCharacter::CombatStancePressed);
+			EIC->BindAction(CombatStanceAction, ETriggerEvent::Completed, this, &AHeavyCharacter::CombatStanceReleased);
+		}
 	}
 }
 
@@ -300,6 +323,20 @@ void AHeavyCharacter::PossessedBy(AController* NewController)
 	Super::PossessedBy(NewController);
 
 	UE_LOG(LogTemp, Warning, TEXT("Character Possessed by: %s"), *NewController->GetName());
+}
+
+void AHeavyCharacter::HandleTurn(const FInputActionValue& Value)
+{
+	// Get turn input (-1 to 1, where -1 = left, 1 = right)
+	TurnInput = Value.Get<float>();
+    
+#if !UE_BUILD_SHIPPING
+	if (TurnInput != 0.f)
+	{
+		GEngine->AddOnScreenDebugMessage(15, 0.f, FColor::Orange,
+			FString::Printf(TEXT("Turn Input: %.2f"), TurnInput));
+	}
+#endif
 }
 
 void AHeavyCharacter::HandleMove(const struct FInputActionValue& Value)
@@ -351,6 +388,59 @@ void AHeavyCharacter::OnRep_CurrentStamina()
 		                                                 CurrentStamina, MaxStamina, GetStaminaPercent() * 100.f));
 	}
 #endif
+}
+
+void AHeavyCharacter::CombatStancePressed()
+{
+	bIsInCombatStance = true;
+	bFaceMouseCursor = true;
+    
+#if !UE_BUILD_SHIPPING
+	GEngine->AddOnScreenDebugMessage(16, 2.f, FColor::Red, TEXT("COMBAT STANCE"));
+#endif
+}
+
+void AHeavyCharacter::CombatStanceReleased()
+{
+	bIsInCombatStance = false;
+	bFaceMouseCursor = false;
+}
+
+void AHeavyCharacter::UpdateMouseFacing(float DeltaTime)
+{
+	if (!bFaceMouseCursor)
+	{
+		return;
+	}
+    
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+    
+	// Get mouse position in world space
+	FHitResult HitResult;
+	PC->GetHitResultUnderCursor(ECC_Visibility, false, HitResult);
+    
+	if (HitResult.bBlockingHit)
+	{
+		// Calculate direction to mouse cursor
+		FVector ToMouse = HitResult.Location - GetActorLocation();
+		ToMouse.Z = 0.f; // Keep rotation on horizontal plane
+        
+		if (!ToMouse.IsNearlyZero())
+		{
+			FRotator TargetRotation = ToMouse.Rotation();
+			FRotator CurrentRotation = GetActorRotation();
+            
+			// Smoothly rotate towards mouse (faster than normal turning for responsiveness)
+			FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, 
+													DeltaTime, 10.0f); // Fast rotation
+            
+			SetActorRotation(NewRotation);
+		}
+	}
 }
 
 void AHeavyCharacter::SprintPressed()
