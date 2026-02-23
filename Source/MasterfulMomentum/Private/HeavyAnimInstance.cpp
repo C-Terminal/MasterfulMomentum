@@ -59,10 +59,38 @@ FString UHeavyAnimInstance::GetMovementStateString() const
 
 void UHeavyAnimInstance::UpdateAnimationData(float DeltaSeconds)
 {
-    // Early out if we don't have valid references
+    
+    // Try to grab the pawn if we don't have one yet
+    APawn* OwningPawn = TryGetPawnOwner();
+    
+    if (!OwningPawn)
+    {
+        return; // Still no pawn, wait for next frame
+    }
+
+    // If we have a pawn but it's not cached as HeavyCharacter yet, try to cast
+    if (!HeavyCharacter)
+    {
+        HeavyCharacter = Cast<AHeavyCharacter>(OwningPawn);
+        
+        if (HeavyCharacter)
+        {
+            HeavyMovement = Cast<UHeavyCharacterMovementComponent>(HeavyCharacter->GetCharacterMovement());
+        }
+    }
+
+    // FINAL GUARD: If the cast fails (e.g. it's the wrong class), stop here
     if (!HeavyCharacter || !HeavyMovement)
     {
+        // This confirms the character in the level IS NOT a child of AHeavyCharacter
+        if (GEngine) GEngine->AddOnScreenDebugMessage(1, 0.f, FColor::Red, TEXT("CRITICAL: Pawn is NOT AHeavyCharacter!"));
         return;
+    }
+    
+    if (GEngine && HeavyCharacter)
+    {
+        GEngine->AddOnScreenDebugMessage(5, 0.f, FColor::Yellow, 
+            FString::Printf(TEXT("Speed: %f | Dir: %f"), GroundSpeed, Direction));
     }
 
     // === Update Movement Data ===
