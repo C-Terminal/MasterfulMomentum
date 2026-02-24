@@ -10,6 +10,6 @@ public class MasterfulMomentumTarget : TargetRules
 		Type = TargetType.Game;
 		DefaultBuildSettings = BuildSettingsVersion.V6;
 
-		ExtraModuleNames.AddRange( new string[] { "MasterfulMomentum" } );
+		ExtraModuleNames.AddRange(new string[] { "MasterfulMomentum" });
 	}
 }

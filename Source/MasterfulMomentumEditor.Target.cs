@@ -10,6 +10,6 @@ public class MasterfulMomentumEditorTarget : TargetRules
 		Type = TargetType.Editor;
 		DefaultBuildSettings = BuildSettingsVersion.V6;
 
-		ExtraModuleNames.AddRange( new string[] { "MasterfulMomentum" } );
+		ExtraModuleNames.AddRange(new string[] { "MasterfulMomentum" });
 	}
 }
