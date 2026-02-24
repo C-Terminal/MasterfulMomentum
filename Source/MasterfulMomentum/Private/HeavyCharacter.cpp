@@ -5,6 +5,7 @@
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "HeavyAnimInstance.h"
 #include "InputMappingContext.h"
 #include "Net/UnrealNetwork.h"
 
@@ -404,7 +405,7 @@ void AHeavyCharacter::CombatStancePressed()
 	bFaceMouseCursor = true;
 
 #if !UE_BUILD_SHIPPING
-	GEngine->AddOnScreenDebugMessage(16, 2.f, FColor::Red, TEXT("COMBAT STANCE"));
+	GEngine->AddOnScreenDebugMessage(16, 2.f, FColor::Green, TEXT("COMBAT STANCE: ON"));
 #endif
 }
 
@@ -412,6 +413,11 @@ void AHeavyCharacter::CombatStanceReleased()
 {
 	bIsInCombatStance = false;
 	bFaceMouseCursor = false;
+	bIsReadyToAttack = false;
+
+#if !UE_BUILD_SHIPPING
+	GEngine->AddOnScreenDebugMessage(16, 2.f, FColor::Red, TEXT("COMBAT STANCE: OFF"));
+#endif
 }
 
 void AHeavyCharacter::UpdateMouseFacing(float DeltaTime)
