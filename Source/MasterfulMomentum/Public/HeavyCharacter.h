@@ -4,6 +4,9 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
+#include "FootstepAudioSystem.h"
+#include "FootstepTypes.h"
+
 #include "HeavyCharacterMovementComponent.h"
 #include "HeavyCharacter.generated.h"
 
@@ -50,9 +53,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
 	bool bFaceMouseCursor = false;
 
+
+	// === Footstep Audio ===
+
+	// Called by animation notifies
+	UFUNCTION(BlueprintCallable, Category = "Audio")
+	void PlayFootstepSound(EFootType FootType);
+
 protected:
 	// === General ===
 	virtual void BeginPlay() override;
+
+
+	// === Footstep Audio ===
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep Audio")
+	UFootstepAudioSystem* FootstepAudioSystem;
 
 	// === Camera Panning ===
 
@@ -213,4 +228,9 @@ public:
 	/** Absolute yaw speed for animation (always positive) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
 	float AbsYawDelta = 0.f;
+
+private:
+	// === Footstep Audio ===
+
+	ESurfaceType GetSurfaceTypeUnderFoot() const;
 };
