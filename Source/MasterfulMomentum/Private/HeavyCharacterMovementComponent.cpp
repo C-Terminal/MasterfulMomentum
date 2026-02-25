@@ -38,7 +38,7 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 {
 	if (deltaTime < MIN_TICK_TIME) return;
 
-	// Use our custom input instead of ConsumeInputVector
+	// Get custom input
 	FVector InputVector = CustomInputVector;
 	CustomInputVector = FVector::ZeroVector;
 
@@ -49,26 +49,48 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 
 	bool bHasInput = !InputVector.IsNearlyZero();
 
-	// === SPRINT LOGIC ===
+	// === COMBAT STANCE CHECK ===
 	AHeavyCharacter* HeavyChar = Cast<AHeavyCharacter>(CharacterOwner);
+	bool bInCombatStance = HeavyChar && HeavyChar->bIsInCombatStance;
+
+	// === SPRINT LOGIC ===
+	// Can't sprint in combat stance
 	bool bWantsToSprint = HeavyChar && HeavyChar->bWantsToSprint;
 	bool bCanSprint = HeavyChar && HeavyChar->CanSprint();
 	bool bMovingFastEnough = Velocity.Size() > MinSprintVelocity;
 
 	bool bWasSprintingLastFrame = bIsSprinting;
-	bIsSprinting = bWantsToSprint && bCanSprint && bHasInput && (bMovingFastEnough || bWasSprintingLastFrame);
+	bIsSprinting = !bInCombatStance && bWantsToSprint && bCanSprint && bHasInput && (bMovingFastEnough ||
+		bWasSprintingLastFrame);
 
 	if (HeavyChar)
 	{
 		HeavyChar->UpdateStamina(deltaTime, bIsSprinting);
 	}
 
-	float CurrentSpeedMult = bIsSprinting ? SprintSpeedMultiplier : 1.0f;
-	float CurrentAccelMult = bIsSprinting ? SprintAccelerationMultiplier : 1.0f;
-	float CurrentTurnMult = bIsSprinting ? SprintTurnRateMultiplier : 1.0f;
+	// === CALCULATE SPEED MULTIPLIERS ===
+	float CurrentSpeedMult = 1.0f;
+	float CurrentAccelMult = 1.0f;
+	float CurrentTurnMult = 1.0f;
+
+	if (bInCombatStance)
+	{
+		// Apply combat stance speed reduction
+		CurrentSpeedMult = HeavyChar->CombatMovementSpeedMultiplier;
+		CurrentAccelMult = HeavyChar->CombatMovementSpeedMultiplier;
+		CurrentTurnMult = 0.5f; // Slower turning in combat stance
+	}
+	else if (bIsSprinting)
+	{
+		// Normal sprint multipliers
+		CurrentSpeedMult = SprintSpeedMultiplier;
+		CurrentAccelMult = SprintAccelerationMultiplier;
+		CurrentTurnMult = SprintTurnRateMultiplier;
+	}
 
 	// --- A. Calculate Rotation (Heavy Turning) ---
-	if (!InputVector.IsNearlyZero())
+	// In combat stance, rotation is handled by UpdateMouseFacing, but we still apply input rotation if not in combat
+	if (!InputVector.IsNearlyZero() && !bInCombatStance)
 	{
 		FRotator CurrentRotation = UpdatedComponent->GetComponentRotation();
 		FRotator TargetRotation = InputVector.Rotation();
@@ -88,7 +110,7 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 		float SurfaceMult = 1.0f;
 		float EffectiveAcceleration = HeavyAcceleration * CurrentAccelMult;
 
-		// THE FIX: Angle the input parallel to the current floor so we don't push "into" the ramp
+		// Angle the input parallel to the current floor so we don't push "into" the ramp
 		FVector SlopeInput = InputVector;
 		if (CurrentFloor.IsWalkableFloor() && CurrentFloor.HitResult.Normal.Z > KINDA_SMALL_NUMBER)
 		{
@@ -98,7 +120,11 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 		AppliedForce = SlopeInput * EffectiveAcceleration * SurfaceMult;
 
 #if !UE_BUILD_SHIPPING
-		if (bIsSprinting)
+		if (bInCombatStance)
+		{
+			GEngine->AddOnScreenDebugMessage(13, 0.f, FColor::Orange, TEXT("COMBAT MOVEMENT"));
+		}
+		else if (bIsSprinting)
 		{
 			GEngine->AddOnScreenDebugMessage(13, 0.f, FColor::Yellow, TEXT("SPRINTING"));
 		}
@@ -110,7 +136,10 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 		if (!CurrentVelocity.IsNearlyZero())
 		{
 			FVector FrictionDir = -CurrentVelocity.GetSafeNormal();
-			AppliedForce = FrictionDir * HeavyDeceleration;
+
+			// Use stronger braking in combat stance for quicker stop when releasing keys
+			float BrakingForce = bInCombatStance ? HeavyDeceleration * 1.5f : HeavyDeceleration;
+			AppliedForce = FrictionDir * BrakingForce;
 
 			if ((AppliedForce * deltaTime).SizeSquared() > CurrentVelocity.SizeSquared())
 			{
@@ -210,8 +239,6 @@ void UHeavyCharacterMovementComponent::PhysHeavyGrounded(float deltaTime, int32 
 #endif
 		}
 	}
-
-	
 }
 
 void UHeavyCharacterMovementComponent::OnMovementModeChanged(EMovementMode PreviousMovementMode,

@@ -5,6 +5,7 @@
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "HeavyAnimInstance.h"
 #include "InputMappingContext.h"
 #include "Net/UnrealNetwork.h"
 
@@ -44,6 +45,8 @@ void AHeavyCharacter::BeginPlay()
 	// Initialize stamina to max
 	CurrentStamina = MaxStamina;
 
+	// Initialize rotation tracking
+	PreviousRotation = GetActorRotation();
 
 	// Verify assets are assigned
 	UE_LOG(LogTemp, Warning, TEXT("MoveAction valid: %s"), MoveAction ? TEXT("YES") : TEXT("NO"));
@@ -72,6 +75,32 @@ void AHeavyCharacter::ForceMovement()
 	};
 }
 
+void AHeavyCharacter::UpdateRotationTracking(float DeltaTime)
+{
+	if (DeltaTime <= 0.f)
+	{
+		return;
+	}
+
+	// Get current rotation
+	FRotator CurrentRotation = GetActorRotation();
+
+	// Calculate yaw difference from last frame
+	float YawDifference = CurrentRotation.Yaw - PreviousRotation.Yaw;
+
+	// Normalize to [-180, 180] range (handles wrapping at 360/-360)
+	YawDifference = FMath::UnwindDegrees(YawDifference);
+
+	// Convert to degrees per second
+	YawDelta = YawDifference / DeltaTime;
+
+	// Store absolute value for animation blending (turn speed regardless of direction)
+	AbsYawDelta = FMath::Abs(YawDelta);
+
+	// Cache current rotation for next frame
+	PreviousRotation = CurrentRotation;
+}
+
 // Called every frame
 void AHeavyCharacter::Tick(float DeltaTime)
 {
@@ -92,6 +121,21 @@ void AHeavyCharacter::Tick(float DeltaTime)
 		UpdateCameraPan(DeltaTime);
 	}
 
+	// Update rotation tracking for animations
+	UpdateRotationTracking(DeltaTime);
+
+	// NEW: Apply manual turning
+	if (FMath::Abs(TurnInput) > 0.01f)
+	{
+		FRotator CurrentRotation = GetActorRotation();
+		FRotator NewRotation = CurrentRotation;
+		NewRotation.Yaw += TurnInput * ManualTurnRate * DeltaTime;
+		SetActorRotation(NewRotation);
+	}
+
+	// Update mouse-based facing
+	UpdateMouseFacing(DeltaTime);
+
 	// Stamina update is now handled in the movement component
 	// We just keep the debug display here
 #if !UE_BUILD_SHIPPING
@@ -104,6 +148,12 @@ void AHeavyCharacter::Tick(float DeltaTime)
 		                                 FString::Printf(TEXT("Stamina: %.0f%% %s"),
 		                                                 GetStaminaPercent() * 100.f,
 		                                                 bIsExhausted ? TEXT("[EXHAUSTED]") : TEXT("")));
+	}
+	// Debug yaw delta
+	if (AbsYawDelta > 1.0f) // Only show when turning
+	{
+		GEngine->AddOnScreenDebugMessage(14, 0.f, FColor::Magenta,
+		                                 FString::Printf(TEXT("Yaw Delta: %.1f deg/s"), YawDelta));
 	}
 #endif
 }
@@ -255,6 +305,17 @@ void AHeavyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 			EIC->BindAction(SprintAction, ETriggerEvent::Completed, this, &AHeavyCharacter::SprintReleased);
 			UE_LOG(LogTemp, Warning, TEXT("Successfully bound IA_HeavySprint in C++"));
 		}
+		// NEW: Turn input
+		if (TurnAction)
+		{
+			EIC->BindAction(TurnAction, ETriggerEvent::Triggered, this, &AHeavyCharacter::HandleTurn);
+			EIC->BindAction(TurnAction, ETriggerEvent::Completed, this, &AHeavyCharacter::HandleTurn);
+		}
+		if (CombatStanceAction)
+		{
+			EIC->BindAction(CombatStanceAction, ETriggerEvent::Started, this, &AHeavyCharacter::CombatStancePressed);
+			EIC->BindAction(CombatStanceAction, ETriggerEvent::Completed, this, &AHeavyCharacter::CombatStanceReleased);
+		}
 	}
 }
 
@@ -263,6 +324,20 @@ void AHeavyCharacter::PossessedBy(AController* NewController)
 	Super::PossessedBy(NewController);
 
 	UE_LOG(LogTemp, Warning, TEXT("Character Possessed by: %s"), *NewController->GetName());
+}
+
+void AHeavyCharacter::HandleTurn(const FInputActionValue& Value)
+{
+	// Get turn input (-1 to 1, where -1 = left, 1 = right)
+	TurnInput = Value.Get<float>();
+
+#if !UE_BUILD_SHIPPING
+	if (TurnInput != 0.f)
+	{
+		GEngine->AddOnScreenDebugMessage(15, 0.f, FColor::Orange,
+		                                 FString::Printf(TEXT("Turn Input: %.2f"), TurnInput));
+	}
+#endif
 }
 
 void AHeavyCharacter::HandleMove(const struct FInputActionValue& Value)
@@ -279,16 +354,24 @@ void AHeavyCharacter::HandleMove(const struct FInputActionValue& Value)
 		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-		// Instead of AddMovementInput, set it directly on your custom component
 		if (UHeavyCharacterMovementComponent* HeavyMovement = GetHeavyMovement())
 		{
 			FVector InputDir = (ForwardDirection * MovementVector.Y) + (RightDirection * MovementVector.X);
 			HeavyMovement->CustomInputVector = InputDir;
 
+#if !UE_BUILD_SHIPPING
 			GEngine->AddOnScreenDebugMessage(20, 0.f, FColor::Magenta,
 			                                 FString::Printf(
 				                                 TEXT("CustomInputVector set to: %s"), *InputDir.ToString()));
+#endif
 		}
+
+		UE_LOG(LogTemp, Log, TEXT("Input Received: X=%f, Y=%f"), MovementVector.X, MovementVector.Y);
+
+#if !UE_BUILD_SHIPPING
+		GEngine->AddOnScreenDebugMessage(1, 1.f, FColor::Cyan,
+		                                 FString::Printf(TEXT("Current Velocity: %s"), *GetVelocity().ToString()));
+#endif
 	}
 }
 
@@ -314,6 +397,64 @@ void AHeavyCharacter::OnRep_CurrentStamina()
 		                                                 CurrentStamina, MaxStamina, GetStaminaPercent() * 100.f));
 	}
 #endif
+}
+
+void AHeavyCharacter::CombatStancePressed()
+{
+	bIsInCombatStance = true;
+	bFaceMouseCursor = true;
+
+#if !UE_BUILD_SHIPPING
+	GEngine->AddOnScreenDebugMessage(16, 2.f, FColor::Green, TEXT("COMBAT STANCE: ON"));
+#endif
+}
+
+void AHeavyCharacter::CombatStanceReleased()
+{
+	bIsInCombatStance = false;
+	bFaceMouseCursor = false;
+	bIsReadyToAttack = false;
+
+#if !UE_BUILD_SHIPPING
+	GEngine->AddOnScreenDebugMessage(16, 2.f, FColor::Red, TEXT("COMBAT STANCE: OFF"));
+#endif
+}
+
+void AHeavyCharacter::UpdateMouseFacing(float DeltaTime)
+{
+	if (!bFaceMouseCursor)
+	{
+		return;
+	}
+
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (!PC)
+	{
+		return;
+	}
+
+	// Get mouse position in world space
+	FHitResult HitResult;
+	PC->GetHitResultUnderCursor(ECC_Visibility, false, HitResult);
+
+	if (HitResult.bBlockingHit)
+	{
+		// Calculate direction to mouse cursor
+		FVector ToMouse = HitResult.Location - GetActorLocation();
+		ToMouse.Z = 0.f; // Keep rotation on horizontal plane
+
+		if (!ToMouse.IsNearlyZero())
+		{
+			FRotator TargetRotation = ToMouse.Rotation();
+			FRotator CurrentRotation = GetActorRotation();
+
+			// Smoothly rotate towards mouse (faster than normal turning for responsiveness)
+			FRotator NewRotation = FMath::RInterpTo(CurrentRotation, TargetRotation,
+			                                        DeltaTime, 10.0f); // Fast rotation
+
+			SetActorRotation(NewRotation);
+		}
+	}
 }
 
 void AHeavyCharacter::SprintPressed()

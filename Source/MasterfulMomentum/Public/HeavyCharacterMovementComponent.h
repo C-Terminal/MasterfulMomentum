@@ -48,7 +48,7 @@ public:
 	FVector CustomInputVector;
 
 	// === Sprint System ===
-    
+
 	/** Sprint speed multiplier (applied to HeavyMaxSpeed) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Heavy Movement|Sprint", meta = (ClampMin = "1.0"))
 	float SprintSpeedMultiplier = 1.5f;
@@ -68,11 +68,10 @@ public:
 	/** Is character currently sprinting? (determined by movement component) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Heavy Movement|Sprint")
 	bool bIsSprinting = false;
+
 private:
 	/** Time since we last had valid ground (for coyote time) */
 	float TimeSinceLastValidFloor = 0.f;
-
-
 
 protected:
 	// --- Core CMC Overrides ---
@@ -85,7 +84,7 @@ protected:
 
 	/** Called when movement mode changes */
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
-    
+
 	/** Handle landing logic */
 	virtual void ProcessLanded(const FHitResult& Hit, float remainingTime, int32 Iterations) override;
 

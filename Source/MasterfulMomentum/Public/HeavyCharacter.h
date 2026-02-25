@@ -13,7 +13,6 @@ class MASTERFULMOMENTUM_API AHeavyCharacter : public ACharacter
 	GENERATED_BODY()
 
 public:
-
 	// This runs when the pawn is possessed and ready for input
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
@@ -32,23 +31,43 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	class UCameraComponent* FollowCamera;
 	// A pointer to your IMC asset so you can assign it in the Editor
-	
+
+	// === Combat Stance ===
+
+	/** Is character in combat stance? (RMB held) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+	bool bIsInCombatStance = false;
+
+	/** True when the guard animation has blended in enough to allow attacking */
+	UPROPERTY(BlueprintReadOnly, Category = "Combat")
+	bool bIsReadyToAttack = false;
+
+
+	/** Speed multiplier when moving in combat stance (0.3 = 30% of normal speed) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat", meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float CombatMovementSpeedMultiplier = 0.4f;
+	/** Should character face mouse cursor? */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+	bool bFaceMouseCursor = false;
+
 protected:
 	// === General ===
 	virtual void BeginPlay() override;
-	
+
 	// === Camera Panning ===
-    
+
 	/** Maximum distance camera can pan from character center (in world units) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Panning")
 	float MaxCameraPanDistance = 400.0f;
 
 	/** How quickly camera moves to target position (higher = snappier) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Panning", meta = (ClampMin = "0.1", ClampMax = "20.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Panning",
+		meta = (ClampMin = "0.1", ClampMax = "20.0"))
 	float CameraPanSpeed = 5.0f;
 
 	/** Dead zone in center of screen where camera doesn't pan (0.0 - 0.5) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Panning", meta = (ClampMin = "0.0", ClampMax = "0.5"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Panning",
+		meta = (ClampMin = "0.0", ClampMax = "0.5"))
 	float CameraPanDeadZone = 0.1f;
 
 	/** Should camera panning be enabled? */
@@ -80,6 +99,33 @@ protected:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	virtual void PossessedBy(AController* NewController) override;
+
+
+	// === Turn Input ===
+
+	/** Input action for turning (arrow keys) */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* TurnAction;
+
+	/** Desired turn direction from input (-1 = left, 1 = right, 0 = none) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Input")
+	float TurnInput = 0.f;
+
+	/** How fast to turn when using arrow keys (degrees per second) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+	float ManualTurnRate = 180.0f;
+
+	void HandleTurn(const FInputActionValue& Value);
+
+	// === Combat Stance ===
+
+	/** Input action for combat stance */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	UInputAction* CombatStanceAction;
+
+	void CombatStancePressed();
+	void CombatStanceReleased();
+	void UpdateMouseFacing(float DeltaTime);
 
 	// == Stamina System ===
 	/** Maximum stamina pool */
@@ -119,9 +165,20 @@ protected:
 	void SprintPressed();
 	void SprintReleased();
 
+	// === Animation Data ===
 
-	
-public:	
+	/** Actor's yaw rotation from previous frame (for turn-in-place) */
+	FRotator PreviousRotation;
+
+	/** Update rotation tracking for animation */
+	void UpdateRotationTracking(float DeltaTime);
+
+	// === Combat Anims ===
+	/** Reference to the single-frame guard montage */
+	UPROPERTY(EditDefaultsOnly, Category = "Combat Animations")
+	UAnimMontage* RaiseFistsMontage;
+
+public:
 	// Called every frame
 	virtual void Tick(float DeltaTime) override;
 
@@ -148,4 +205,12 @@ public:
 	void UpdateStamina(float DeltaTime, bool bIsSprinting);
 
 
+	// === Anim Data ===
+	/** How fast character is turning (degrees per second) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+	float YawDelta = 0.f;
+
+	/** Absolute yaw speed for animation (always positive) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
+	float AbsYawDelta = 0.f;
 };
