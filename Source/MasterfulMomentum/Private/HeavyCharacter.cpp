@@ -5,6 +5,7 @@
 #include "Camera/CameraComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "FootstepAudioSystem_Trad.h"
 #include "HeavyAnimInstance.h"
 #include "InputMappingContext.h"
 #include "Net/UnrealNetwork.h"
@@ -30,6 +31,9 @@ AHeavyCharacter::AHeavyCharacter(const FObjectInitializer& ObjectInitializer) : 
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false; // Camera does not rotate relative to arm
+	
+	// In constructor:
+	FootstepAudioSystem = CreateDefaultSubobject<UFootstepAudioSystem_Trad>(TEXT("FootstepAudioSystem"));
 }
 
 UHeavyCharacterMovementComponent* AHeavyCharacter::GetHeavyMovement() const
@@ -532,4 +536,49 @@ bool AHeavyCharacter::CanSprint() const
 	}
 
 	return true;
+}
+
+void AHeavyCharacter::PlayFootstepSound(EFootType FootType)
+{
+	if (!FootstepAudioSystem)
+	{
+		return;
+	}
+	
+	FFootstepContext Context;
+	
+    // Build context from current character state
+
+    Context.SurfaceType = GetSurfaceTypeUnderFoot();
+    Context.Velocity = GetVelocity().Size();
+    Context.StaminaPercent = GetStaminaPercent();
+    Context.bIsInCombat = bIsInCombatStance;
+    Context.bIsSprinting = bWantsToSprint;
+    Context.FootType = FootType;
+    Context.Location = GetActorLocation();
+	
+	FootstepAudioSystem->PlayFootstep(Context);
+}
+
+ESurfaceType AHeavyCharacter::GetSurfaceTypeUnderFoot() const
+{
+	// Line trace down from character
+	FVector Start = GetActorLocation();
+	FVector End = Start - FVector(0, 0, 200.0f); // Trace 200 units down
+
+	FHitResult HitResult;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+
+	if (GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, QueryParams))
+	{
+		if (HitResult.PhysMaterial.IsValid())
+		{
+			// You'll map physical materials to surface types
+			// For now, return default
+			return ESurfaceType::Default;
+		}
+	}
+
+	return ESurfaceType::Default;
 }
