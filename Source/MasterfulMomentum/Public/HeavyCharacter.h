@@ -6,7 +6,7 @@
 #include "GameFramework/Character.h"
 #include "FootstepAudioSystem.h"
 #include "FootstepTypes.h"
-
+#include "InputActionValue.h"
 #include "HeavyCharacterMovementComponent.h"
 #include "HeavyCharacter.generated.h"
 
@@ -69,6 +69,43 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Footstep Audio")
 	UFootstepAudioSystem* FootstepAudioSystem;
 
+	// === Camera Zoom ===
+
+	/** Current target arm length (what we're lerping towards) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera|Zoom")
+	float TargetArmLength = 600.0f;
+
+	/** Minimum zoom distance (closest to character) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom",
+		meta = (ClampMin = "100.0", ClampMax = "1000.0"))
+	float MinZoomDistance = 200.0f;
+
+	/** Maximum zoom distance (farthest from character) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom",
+		meta = (ClampMin = "200.0", ClampMax = "2000.0"))
+	float MaxZoomDistance = 1200.0f;
+
+	/** Default zoom distance (starting position) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom")
+	float DefaultZoomDistance = 600.0f;
+
+	/** How fast camera zooms in/out */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom", meta = (ClampMin = "1.0", ClampMax = "20.0"))
+	float ZoomSpeed = 8.0f;
+
+	/** How much each mouse wheel notch zooms (units) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom",
+		meta = (ClampMin = "10.0", ClampMax = "200.0"))
+	float ZoomIncrement = 100.0f;
+
+	/** Should zoom be smooth or instant? */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Zoom")
+	bool bSmoothZoom = true;
+
+	// To this:
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+	class UInputAction* ZoomAction;
+
 	// === Camera Panning ===
 
 	/** Maximum distance camera can pan from character center (in world units) */
@@ -91,6 +128,92 @@ protected:
 
 	/** Current camera offset (smoothed) */
 	FVector CurrentCameraOffset;
+
+	// === Camera Collision ===
+
+	/** Enable camera collision detection */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Collision")
+	bool bEnableCameraCollision = true;
+
+	/** Collision channel to use for camera traces */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Collision")
+	TEnumAsByte<ECollisionChannel> CameraCollisionChannel = ECC_Camera;
+
+	/** Radius of camera collision sphere */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Collision",
+		meta = (ClampMin = "5.0", ClampMax = "50.0"))
+	float CameraCollisionProbeSize = 12.0f;
+
+	/** How quickly camera returns to normal position after collision */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Collision",
+		meta = (ClampMin = "1.0", ClampMax = "20.0"))
+	float CameraCollisionRecoverySpeed = 5.0f;
+
+	// === Camera Occlusion (Fade Walls) ===
+
+	/** Enable automatic wall fading */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Occlusion")
+	bool bEnableOcclusionFading = true;
+
+	/** How transparent occluding actors become (0 = invisible, 1 = opaque) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Occlusion",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float OcclusionFadeOpacity = 0.2f;
+
+	/** How fast actors fade in/out */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Occlusion",
+		meta = (ClampMin = "1.0", ClampMax = "20.0"))
+	float OcclusionFadeSpeed = 8.0f;
+
+	/** Actors currently being faded */
+	UPROPERTY()
+	TArray<AActor*> OccludedActors;
+
+	/** Material parameter name for opacity control */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Occlusion")
+	FName OpacityParameterName = "Opacity";
+
+	// === Camera Shake ===
+
+	/** Camera shake class for landing */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Shake")
+	TSubclassOf<UCameraShakeBase> LandingCameraShake;
+
+	/** Minimum fall velocity to trigger camera shake (cm/s) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Shake",
+		meta = (ClampMin = "100.0", ClampMax = "2000.0"))
+	float MinShakeVelocity = 400.0f;
+
+	/** Maximum fall velocity for max shake intensity */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Shake",
+		meta = (ClampMin = "500.0", ClampMax = "3000.0"))
+	float MaxShakeVelocity = 1500.0f;
+
+	/** Scale applied to camera shake */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Camera|Shake", meta = (ClampMin = "0.1", ClampMax = "5.0"))
+	float ShakeIntensityMultiplier = 1.0f;
+
+
+	// === Camera Update Functions ===
+
+	/** Handle zoom input */
+	void HandleZoom(const FInputActionValue& Value);
+
+	/** Update camera zoom smoothly */
+	void UpdateCameraZoom(float DeltaTime);
+
+	/** Check for camera collision and adjust position */
+	void UpdateCameraCollision(float DeltaTime);
+
+	/** Fade actors blocking the camera view */
+	void UpdateOcclusionFading(float DeltaTime);
+
+
+	/** Set material opacity for an actor */
+	void SetActorOpacity(AActor* Actor, float Opacity);
+
+	/** Restore material opacity for an actor */
+	void RestoreActorOpacity(AActor* Actor);
 
 	/** Calculate camera pan offset based on mouse position */
 	void UpdateCameraPan(float DeltaTime);
@@ -228,6 +351,21 @@ public:
 	/** Absolute yaw speed for animation (always positive) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Animation")
 	float AbsYawDelta = 0.f;
+
+	//Camera
+
+	/** Trigger camera shake on landing */
+	void TriggerLandingCameraShake(float ImpactVelocity);
+	/** Get current zoom percentage (0-1, where 0 = min zoom, 1 = max zoom) */
+	UFUNCTION(BlueprintPure, Category = "Camera")
+	float GetZoomPercent() const;
+
+	/** Reset zoom to default distance */
+	UFUNCTION(BlueprintCallable, Category = "Camera")
+	void ResetZoom();
+
+	/** Velocity when character started falling (for landing impact calculation) */
+	float FallStartVelocity = 0.f;
 
 private:
 	// === Footstep Audio ===

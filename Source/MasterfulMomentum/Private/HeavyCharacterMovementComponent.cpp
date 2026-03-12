@@ -245,7 +245,7 @@ void UHeavyCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previ
                                                              uint8 PreviousCustomMode)
 {
 	Super::OnMovementModeChanged(PreviousMovementMode, PreviousCustomMode);
-
+	AHeavyCharacter* HeavyChar = Cast<AHeavyCharacter>(CharacterOwner);
 	// If we just landed from falling, return to heavy grounded mode
 	if (PreviousMovementMode == MOVE_Falling && MovementMode == MOVE_Walking)
 	{
@@ -253,6 +253,16 @@ void UHeavyCharacterMovementComponent::OnMovementModeChanged(EMovementMode Previ
 
 #if !UE_BUILD_SHIPPING
 		UE_LOG(LogTemp, Warning, TEXT("Landed - returning to HeavyGrounded mode"));
+#endif
+	}
+
+	// Track when we start falling (to calculate impact)
+	if (MovementMode == MOVE_Falling && PreviousMovementMode != MOVE_Falling)
+	{
+		HeavyChar->FallStartVelocity = Velocity.Z;
+
+#if !UE_BUILD_SHIPPING
+		UE_LOG(LogTemp, Log, TEXT("Started falling with velocity: %.1f"), HeavyChar->FallStartVelocity);
 #endif
 	}
 
@@ -267,11 +277,20 @@ void UHeavyCharacterMovementComponent::ProcessLanded(const FHitResult& Hit, floa
 {
 	Super::ProcessLanded(Hit, remainingTime, Iterations);
 
-	// Additional landing logic if needed
-	// For example, apply landing impact, play sound, etc.
+	AHeavyCharacter* HeavyChar = Cast<AHeavyCharacter>(CharacterOwner);
+	if (!HeavyChar)
+	{
+		return;
+	}
+
+	// Calculate impact velocity (how fast we were falling when we hit)
+	float ImpactVelocity = Velocity.Z;
+
+	// Trigger camera shake
+	HeavyChar->TriggerLandingCameraShake(ImpactVelocity);
 
 #if !UE_BUILD_SHIPPING
-	UE_LOG(LogTemp, Warning, TEXT("ProcessLanded called - Impact Point: %s"), *Hit.ImpactPoint.ToString());
+	UE_LOG(LogTemp, Warning, TEXT("ProcessLanded - Impact Velocity: %.1f"), ImpactVelocity);
 #endif
 }
 
