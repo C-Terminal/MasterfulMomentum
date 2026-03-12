@@ -25,13 +25,18 @@ AHeavyCharacter::AHeavyCharacter(const FObjectInitializer& ObjectInitializer) : 
 	// Inside AHeavyCharacter::AHeavyCharacter constructor:
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
 	CameraBoom->SetupAttachment(RootComponent);
-	CameraBoom->TargetArmLength = 400.0f; // Distance behind character
+	CameraBoom->TargetArmLength = DefaultZoomDistance; // Distance behind character
 	CameraBoom->bUsePawnControlRotation = true; // Rotate arm based on controller
+	CameraBoom->bDoCollisionTest = false; // We'll handle collision manually for better control
+
 
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false; // Camera does not rotate relative to arm
-	
+
+
+	// Initialize zoom
+	TargetArmLength = DefaultZoomDistance;
 	// In constructor:
 	FootstepAudioSystem = CreateDefaultSubobject<UFootstepAudioSystem_Trad>(TEXT("FootstepAudioSystem"));
 }
@@ -56,6 +61,12 @@ void AHeavyCharacter::BeginPlay()
 	UE_LOG(LogTemp, Warning, TEXT("MoveAction valid: %s"), MoveAction ? TEXT("YES") : TEXT("NO"));
 	UE_LOG(LogTemp, Warning, TEXT("HeavyMovementContext valid: %s"), HeavyMovementContext ? TEXT("YES") : TEXT("NO"));
 
+	// Set initial camera distance
+	if (CameraBoom)
+	{
+		CameraBoom->TargetArmLength = DefaultZoomDistance;
+		TargetArmLength = DefaultZoomDistance;
+	}
 
 	// Force the character into your Project Zomboid-style movement mode
 	if (GetCharacterMovement())
@@ -140,6 +151,11 @@ void AHeavyCharacter::Tick(float DeltaTime)
 	// Update mouse-based facing
 	UpdateMouseFacing(DeltaTime);
 
+	// === NEW CAMERA SYSTEMS ===
+	UpdateCameraZoom(DeltaTime);
+	UpdateCameraCollision(DeltaTime);
+	UpdateOcclusionFading(DeltaTime);
+
 	// Stamina update is now handled in the movement component
 	// We just keep the debug display here
 #if !UE_BUILD_SHIPPING
@@ -158,6 +174,14 @@ void AHeavyCharacter::Tick(float DeltaTime)
 	{
 		GEngine->AddOnScreenDebugMessage(14, 0.f, FColor::Magenta,
 		                                 FString::Printf(TEXT("Yaw Delta: %.1f deg/s"), YawDelta));
+	}
+
+	// Camera debug
+	if (CameraBoom)
+	{
+		GEngine->AddOnScreenDebugMessage(18, 0.f, FColor::Cyan,
+		                                 FString::Printf(TEXT("Zoom: %.0f%% (%.0f units)"),
+		                                                 GetZoomPercent() * 100.f, CameraBoom->TargetArmLength));
 	}
 #endif
 }
@@ -319,6 +343,12 @@ void AHeavyCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComp
 		{
 			EIC->BindAction(CombatStanceAction, ETriggerEvent::Started, this, &AHeavyCharacter::CombatStancePressed);
 			EIC->BindAction(CombatStanceAction, ETriggerEvent::Completed, this, &AHeavyCharacter::CombatStanceReleased);
+		}
+		// NEW: Zoom binding
+		if (ZoomAction)
+		{
+			EIC->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &AHeavyCharacter::HandleZoom);
+			UE_LOG(LogTemp, Warning, TEXT("Zoom action bound successfully"));
 		}
 	}
 }
@@ -544,19 +574,19 @@ void AHeavyCharacter::PlayFootstepSound(EFootType FootType)
 	{
 		return;
 	}
-	
-	FFootstepContext Context;
-	
-    // Build context from current character state
 
-    Context.SurfaceType = GetSurfaceTypeUnderFoot();
-    Context.Velocity = GetVelocity().Size();
-    Context.StaminaPercent = GetStaminaPercent();
-    Context.bIsInCombat = bIsInCombatStance;
-    Context.bIsSprinting = bWantsToSprint;
-    Context.FootType = FootType;
-    Context.Location = GetActorLocation();
-	
+	FFootstepContext Context;
+
+	// Build context from current character state
+
+	Context.SurfaceType = GetSurfaceTypeUnderFoot();
+	Context.Velocity = GetVelocity().Size();
+	Context.StaminaPercent = GetStaminaPercent();
+	Context.bIsInCombat = bIsInCombatStance;
+	Context.bIsSprinting = bWantsToSprint;
+	Context.FootType = FootType;
+	Context.Location = GetActorLocation();
+
 	FootstepAudioSystem->PlayFootstep(Context);
 }
 
@@ -581,4 +611,328 @@ ESurfaceType AHeavyCharacter::GetSurfaceTypeUnderFoot() const
 	}
 
 	return ESurfaceType::Default;
+}
+
+
+// ============================================================================
+// CAMERA ZOOM
+// ============================================================================
+
+void AHeavyCharacter::HandleZoom(const FInputActionValue& Value)
+{
+	if (!CameraBoom)
+	{
+		return;
+	}
+
+	// Get scroll input (1.0 = scroll up, -1.0 = scroll down)
+	float ScrollValue = Value.Get<float>();
+
+	// Adjust target zoom
+	// Positive scroll = zoom in (decrease distance)
+	// Negative scroll = zoom out (increase distance)
+	TargetArmLength -= ScrollValue * ZoomIncrement;
+
+	// Clamp to min/max
+	TargetArmLength = FMath::Clamp(TargetArmLength, MinZoomDistance, MaxZoomDistance);
+
+#if !UE_BUILD_SHIPPING
+	UE_LOG(LogTemp, Log, TEXT("Zoom input: %.2f, Target: %.1f"), ScrollValue, TargetArmLength);
+#endif
+}
+
+void AHeavyCharacter::UpdateCameraZoom(float DeltaTime)
+{
+	if (!CameraBoom)
+	{
+		return;
+	}
+
+	float CurrentArmLength = CameraBoom->TargetArmLength;
+
+	if (bSmoothZoom)
+	{
+		// Smooth interpolation
+		float NewArmLength = FMath::FInterpTo(CurrentArmLength, TargetArmLength, DeltaTime, ZoomSpeed);
+		CameraBoom->TargetArmLength = NewArmLength;
+	}
+	else
+	{
+		//TODO: Call this during cutscenes or special events
+		// Instant zoom
+		CameraBoom->TargetArmLength = TargetArmLength;
+	}
+}
+
+float AHeavyCharacter::GetZoomPercent() const
+{
+	if (!CameraBoom)
+	{
+		return 0.5f;
+	}
+
+	// Normalize current zoom to 0-1 range
+	// 0 = fully zoomed in (MinZoomDistance)
+	// 1 = fully zoomed out (MaxZoomDistance)
+	float Range = MaxZoomDistance - MinZoomDistance;
+	if (Range <= 0.f)
+	{
+		return 0.5f;
+	}
+
+	return (CameraBoom->TargetArmLength - MinZoomDistance) / Range;
+}
+
+void AHeavyCharacter::ResetZoom()
+{
+	TargetArmLength = DefaultZoomDistance;
+}
+
+// ============================================================================
+// CAMERA COLLISION
+// ============================================================================
+
+void AHeavyCharacter::UpdateCameraCollision(float DeltaTime)
+{
+	if (!bEnableCameraCollision || !CameraBoom || !FollowCamera)
+	{
+		return;
+	}
+
+	// Get camera and character positions
+	FVector CameraLocation = FollowCamera->GetComponentLocation();
+	FVector CharacterLocation = GetActorLocation();
+	FVector BoomOrigin = CameraBoom->GetComponentLocation();
+
+	// Trace from boom origin to camera
+	FHitResult Hit;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+	QueryParams.bTraceComplex = false;
+
+	bool bHit = GetWorld()->SweepSingleByChannel(
+		Hit,
+		BoomOrigin,
+		CameraLocation,
+		FQuat::Identity,
+		CameraCollisionChannel,
+		FCollisionShape::MakeSphere(CameraCollisionProbeSize),
+		QueryParams
+	);
+
+	if (bHit && Hit.bBlockingHit)
+	{
+		// Calculate how much closer the camera needs to be
+		float DistanceToHit = (Hit.Location - BoomOrigin).Size();
+		float DesiredArmLength = DistanceToHit - CameraCollisionProbeSize;
+
+		// Clamp to reasonable range
+		DesiredArmLength = FMath::Clamp(DesiredArmLength, MinZoomDistance, CameraBoom->TargetArmLength);
+
+		// Snap camera closer immediately to avoid clipping
+		CameraBoom->TargetArmLength = DesiredArmLength;
+
+#if ENABLE_DRAW_DEBUG && !UE_BUILD_SHIPPING
+		DrawDebugSphere(GetWorld(), Hit.Location, CameraCollisionProbeSize, 8, FColor::Red, false, 0.f);
+#endif
+	}
+	else
+	{
+		// No collision - smoothly return to target zoom
+		float CurrentArmLength = CameraBoom->TargetArmLength;
+		float NewArmLength = FMath::FInterpTo(CurrentArmLength, TargetArmLength, DeltaTime,
+		                                      CameraCollisionRecoverySpeed);
+		CameraBoom->TargetArmLength = NewArmLength;
+	}
+}
+
+// ============================================================================
+// OCCLUSION FADING
+// ============================================================================
+
+void AHeavyCharacter::UpdateOcclusionFading(float DeltaTime)
+{
+	if (!bEnableOcclusionFading || !FollowCamera)
+	{
+		return;
+	}
+
+	FVector CameraLocation = FollowCamera->GetComponentLocation();
+	FVector CharacterLocation = GetActorLocation();
+
+	// Trace from camera to character
+	TArray<FHitResult> Hits;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+	QueryParams.bTraceComplex = false;
+
+	GetWorld()->LineTraceMultiByChannel(
+		Hits,
+		CameraLocation,
+		CharacterLocation,
+		ECC_Visibility,
+		QueryParams
+	);
+
+	// Track which actors should be faded this frame
+	TArray<AActor*> ActorsToFade;
+
+	for (const FHitResult& Hit : Hits)
+	{
+		if (Hit.GetActor() && Hit.GetActor() != this)
+		{
+			AActor* HitActor = Hit.GetActor();
+
+			// Only fade actors with static meshes
+			if (HitActor->FindComponentByClass<UStaticMeshComponent>())
+			{
+				ActorsToFade.Add(HitActor);
+			}
+		}
+	}
+
+	// Fade new occluding actors
+	for (AActor* Actor : ActorsToFade)
+	{
+		if (!OccludedActors.Contains(Actor))
+		{
+			OccludedActors.Add(Actor);
+		}
+		SetActorOpacity(Actor, OcclusionFadeOpacity);
+	}
+
+	// Restore actors no longer occluding
+	for (int32 i = OccludedActors.Num() - 1; i >= 0; --i)
+	{
+		AActor* Actor = OccludedActors[i];
+		if (!ActorsToFade.Contains(Actor))
+		{
+			RestoreActorOpacity(Actor);
+			OccludedActors.RemoveAt(i);
+		}
+	}
+
+#if ENABLE_DRAW_DEBUG && !UE_BUILD_SHIPPING
+	DrawDebugLine(GetWorld(), CameraLocation, CharacterLocation, FColor::Yellow, false, 0.f);
+#endif
+}
+
+void AHeavyCharacter::SetActorOpacity(AActor* Actor, float Opacity)
+{
+	if (!Actor)
+	{
+		return;
+	}
+
+	TArray<UStaticMeshComponent*> MeshComponents;
+	Actor->GetComponents<UStaticMeshComponent>(MeshComponents);
+
+	for (UStaticMeshComponent* MeshComp : MeshComponents)
+	{
+		if (!MeshComp)
+		{
+			continue;
+		}
+
+		// Get all materials on the mesh
+		int32 NumMaterials = MeshComp->GetNumMaterials();
+		for (int32 i = 0; i < NumMaterials; ++i)
+		{
+			UMaterialInterface* Material = MeshComp->GetMaterial(i);
+			if (!Material)
+			{
+				continue;
+			}
+
+			// Create dynamic material instance if not already created
+			UMaterialInstanceDynamic* DynMaterial = Cast<UMaterialInstanceDynamic>(Material);
+			if (!DynMaterial)
+			{
+				DynMaterial = MeshComp->CreateDynamicMaterialInstance(i, Material);
+			}
+
+			if (DynMaterial)
+			{
+				// Set opacity parameter (requires material to have this parameter)
+				DynMaterial->SetScalarParameterValue(OpacityParameterName, Opacity);
+
+				// Ensure the mesh renders translucent
+				MeshComp->SetCastShadow(false);
+			}
+		}
+	}
+}
+
+void AHeavyCharacter::RestoreActorOpacity(AActor* Actor)
+{
+	if (!Actor)
+	{
+		return;
+	}
+
+	TArray<UStaticMeshComponent*> MeshComponents;
+	Actor->GetComponents<UStaticMeshComponent>(MeshComponents);
+
+	for (UStaticMeshComponent* MeshComp : MeshComponents)
+	{
+		if (!MeshComp)
+		{
+			continue;
+		}
+
+		int32 NumMaterials = MeshComp->GetNumMaterials();
+		for (int32 i = 0; i < NumMaterials; ++i)
+		{
+			UMaterialInterface* Material = MeshComp->GetMaterial(i);
+			UMaterialInstanceDynamic* DynMaterial = Cast<UMaterialInstanceDynamic>(Material);
+
+			if (DynMaterial)
+			{
+				// Restore to full opacity
+				DynMaterial->SetScalarParameterValue(OpacityParameterName, 1.0f);
+			}
+		}
+
+		// Restore shadow casting
+		MeshComp->SetCastShadow(true);
+	}
+}
+
+// ============================================================================
+// CAMERA SHAKE ON LANDING
+// ============================================================================
+
+void AHeavyCharacter::TriggerLandingCameraShake(float ImpactVelocity)
+{
+	if (!LandingCameraShake)
+	{
+		return;
+	}
+
+	// Ignore small impacts
+	if (FMath::Abs(ImpactVelocity) < MinShakeVelocity)
+	{
+		return;
+	}
+
+	// Calculate shake intensity based on fall velocity
+	float VelocityRange = MaxShakeVelocity - MinShakeVelocity;
+	float NormalizedVelocity = FMath::Clamp(
+		(FMath::Abs(ImpactVelocity) - MinShakeVelocity) / VelocityRange,
+		0.0f,
+		1.0f
+	);
+
+	float ShakeScale = NormalizedVelocity * ShakeIntensityMultiplier;
+
+	// Play camera shake
+	APlayerController* PC = Cast<APlayerController>(GetController());
+	if (PC)
+	{
+		PC->ClientStartCameraShake(LandingCameraShake, ShakeScale);
+
+#if !UE_BUILD_SHIPPING
+		UE_LOG(LogTemp, Warning, TEXT("Landing shake: Velocity=%.1f, Scale=%.2f"), ImpactVelocity, ShakeScale);
+#endif
+	}
 }
